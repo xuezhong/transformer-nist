@@ -4,7 +4,7 @@ class TrainTaskConfig(object):
     pass_num = 100
 
     # the number of sequences contained in a mini-batch.
-    batch_size = 56
+    batch_size = 8  # there are memleak in Op::DataTransform. Need double buffer
 
     # the hyper parameters for Adam optimizer.
     learning_rate = 0.001
@@ -127,3 +127,27 @@ label_data_names = (
     "lbl_word",
     "lbl_weight",
 )
+
+data_shapes = {
+    "src_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "src_pos": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "src_slf_attn_bias": (1, ModelHyperParams.n_head, (ModelHyperParams.max_length + 1),
+                          (ModelHyperParams.max_length + 1)),
+    "src_data_shape": (3L,),
+    "src_slf_attn_pre_softmax_shape": (2L,),
+    "src_slf_attn_post_softmax_shape": (4L,),
+    "trg_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "trg_pos": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "trg_slf_attn_bias": (
+        1, ModelHyperParams.n_head, (ModelHyperParams.max_length + 1), (ModelHyperParams.max_length + 1)),
+    "trg_src_attn_bias": (
+        1, ModelHyperParams.n_head, (ModelHyperParams.max_length + 1), (ModelHyperParams.max_length + 1)),
+    "trg_data_shape": (3L,),
+    "trg_slf_attn_pre_softmax_shape": (2L,),
+    "trg_slf_attn_post_softmax_shape": (4L,),
+    "trg_src_attn_pre_softmax_shape": (2L,),
+    "trg_src_attn_post_softmax_shape": (4L,),
+    "enc_output": (1, (ModelHyperParams.max_length + 1), ModelHyperParams.d_model),
+    "lbl_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "lbl_weight": (1 * (ModelHyperParams.max_length + 1), 1L),
+}

@@ -13,9 +13,9 @@ def position_encoding_init(n_position, d_pos_vec):
     Generate the initial values for the sinusoid position encoding table.
     """
     position_enc = np.array([[
-        pos / np.power(10000, 2 * (j // 2) / d_pos_vec)
-        for j in range(d_pos_vec)
-    ] if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
+                                 pos / np.power(10000, 2 * (j // 2) / d_pos_vec)
+                                 for j in range(d_pos_vec)
+                             ] if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
     position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2])  # dim 2i
     position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2])  # dim 2i+1
     return position_enc.astype("float32")
@@ -110,7 +110,7 @@ def multi_head_attention(queries,
         """
         Scaled Dot-Product Attention
         """
-        scaled_q = layers.scale(x=q, scale=d_model**-0.5)
+        scaled_q = layers.scale(x=q, scale=d_model ** -0.5)
         product = layers.matmul(x=scaled_q, y=k, transpose_y=True)
         weights = layers.reshape(
             x=layers.elementwise_add(x=product, y=attn_bias)
@@ -158,14 +158,14 @@ def positionwise_feed_forward(x, d_inner_hid, d_hid):
         size=d_inner_hid,
         num_flatten_dims=2,
         param_attr=fluid.initializer.Uniform(
-            low=-(d_hid**-0.5), high=(d_hid**-0.5)),
+            low=-(d_hid ** -0.5), high=(d_hid ** -0.5)),
         act="relu")
     out = layers.fc(
         input=hidden,
         size=d_hid,
         num_flatten_dims=2,
         param_attr=fluid.initializer.Uniform(
-            low=-(d_inner_hid**-0.5), high=(d_inner_hid**-0.5)))
+            low=-(d_inner_hid ** -0.5), high=(d_inner_hid ** -0.5)))
     return out
 
 
@@ -542,7 +542,6 @@ def transformer(
         data_shape_flag=True,
         slf_attn_shape_flag=True,
         src_attn_shape_flag=False)
-
     enc_output = wrap_encoder(
         src_vocab_size,
         max_length,
@@ -570,7 +569,6 @@ def transformer(
         data_shape_flag=True,
         slf_attn_shape_flag=True,
         src_attn_shape_flag=True)
-
     predict = wrap_decoder(
         trg_vocab_size,
         max_length,
@@ -586,10 +584,126 @@ def transformer(
         dec_inputs,
         enc_output,
     )
-
     # Padding index do not contribute to the total loss. The weights is used to
     # cancel padding index in calculating the loss.
     gold, weights = make_inputs(
+        label_data_names,
+        n_head,
+        d_model,
+        max_length,
+        is_pos=False,
+        slf_attn_bias_flag=False,
+        src_attn_bias_flag=False,
+        enc_output_flag=False,
+        data_shape_flag=False,
+        slf_attn_shape_flag=False,
+        src_attn_shape_flag=False)
+    cost = layers.softmax_with_cross_entropy(logits=predict, label=gold)
+    weighted_cost = cost * weights
+    sum_cost = layers.reduce_sum(weighted_cost)
+    token_num = layers.reduce_sum(weights)
+    avg_cost = sum_cost / token_num
+    return sum_cost, avg_cost, predict, token_num
+
+
+def make_inputs_parallel_executor(fields,
+                                  input_data_names,
+                                  n_head,
+                                  d_model,
+                                  max_length,
+                                  is_pos,
+                                  slf_attn_bias_flag,
+                                  src_attn_bias_flag,
+                                  enc_output_flag=False,
+                                  data_shape_flag=True,
+                                  slf_attn_shape_flag=True,
+                                  src_attn_shape_flag=True):
+    """
+    Define the input data layers for the transformer model.
+    """
+    result = list()
+
+    result.append(fields[input_data_names[len(result)]])
+    result.append(fields[input_data_names[len(result)]])
+    if slf_attn_bias_flag:
+        result.append(fields[input_data_names[len(result)]])
+    if src_attn_bias_flag:
+        result.append(fields[input_data_names[len(result)]])
+    if data_shape_flag:
+        result.append(fields[input_data_names[len(result)]])
+    if slf_attn_shape_flag:
+        result.append(fields[input_data_names[len(result)]])
+        result.append(fields[input_data_names[len(result)]])
+    if src_attn_shape_flag:
+        result.append(fields[input_data_names[len(result)]])
+        result.append(fields[input_data_names[len(result)]])
+    if enc_output_flag:
+        result.append(fields[input_data_names[len(result)]])
+
+    return result
+
+
+def transformer_pe(
+        field_map,
+        src_vocab_size,
+        trg_vocab_size,
+        max_length,
+        n_layer,
+        n_head,
+        d_key,
+        d_value,
+        d_model,
+        d_inner_hid,
+        dropout_rate,
+        src_pad_idx,
+        trg_pad_idx,
+        pos_pad_idx, ):
+    enc_output = wrap_encoder(
+        src_vocab_size,
+        max_length,
+        n_layer,
+        n_head,
+        d_key,
+        d_value,
+        d_model,
+        d_inner_hid,
+        dropout_rate,
+        src_pad_idx,
+        pos_pad_idx,
+        field_map=field_map,
+    )
+    dec_inputs = make_inputs_parallel_executor(
+        field_map,
+        decoder_input_data_names,
+        n_head,
+        d_model,
+        max_length,
+        is_pos=True,
+        slf_attn_bias_flag=True,
+        src_attn_bias_flag=True,
+        enc_output_flag=False,
+        data_shape_flag=True,
+        slf_attn_shape_flag=True,
+        src_attn_shape_flag=True)
+    predict = wrap_decoder(
+        trg_vocab_size,
+        max_length,
+        n_layer,
+        n_head,
+        d_key,
+        d_value,
+        d_model,
+        d_inner_hid,
+        dropout_rate,
+        trg_pad_idx,
+        pos_pad_idx,
+        dec_inputs,
+        enc_output,
+    )
+    # Padding index do not contribute to the total loss. The weights is used to
+    # cancel padding index in calculating the loss.
+    gold, weights = make_inputs_parallel_executor(
+        field_map,
         label_data_names,
         n_head,
         d_model,
@@ -620,14 +734,15 @@ def wrap_encoder(src_vocab_size,
                  dropout_rate,
                  src_pad_idx,
                  pos_pad_idx,
-                 enc_inputs=None):
+                 enc_inputs=None,
+                 field_map=None):
     """
     The wrapper assembles together all needed layers for the encoder.
     """
-    if enc_inputs is None:
+    if enc_inputs is None and field_map is None:
         # This is used to implement independent encoder program in inference.
         src_word, src_pos, src_slf_attn_bias, src_data_shape, \
-            slf_attn_pre_softmax_shape, slf_attn_post_softmax_shape = \
+        slf_attn_pre_softmax_shape, slf_attn_post_softmax_shape = \
             make_inputs(
                 encoder_input_data_names,
                 n_head,
@@ -640,10 +755,18 @@ def wrap_encoder(src_vocab_size,
                 data_shape_flag=True,
                 slf_attn_shape_flag=True,
                 src_attn_shape_flag=False)
-    else:
+    elif field_map is None:
         src_word, src_pos, src_slf_attn_bias, src_data_shape, \
-            slf_attn_pre_softmax_shape, slf_attn_post_softmax_shape = \
+        slf_attn_pre_softmax_shape, slf_attn_post_softmax_shape = \
             enc_inputs
+    else:
+        src_word = field_map['src_word']
+        src_pos = field_map['src_pos']
+        src_slf_attn_bias = field_map['src_slf_attn_bias']
+        src_data_shape = field_map['src_data_shape']
+        slf_attn_pre_softmax_shape = field_map['src_slf_attn_pre_softmax_shape']
+        slf_attn_post_softmax_shape = field_map['src_slf_attn_post_softmax_shape']
+
     enc_input = prepare_encoder(
         src_word,
         src_pos,
@@ -690,25 +813,25 @@ def wrap_decoder(trg_vocab_size,
     if dec_inputs is None:
         # This is used to implement independent decoder program in inference.
         trg_word, trg_pos, trg_slf_attn_bias, trg_src_attn_bias, \
-            trg_data_shape, slf_attn_pre_softmax_shape, \
-            slf_attn_post_softmax_shape, src_attn_pre_softmax_shape, \
-            src_attn_post_softmax_shape, enc_output = make_inputs(
-                decoder_input_data_names,
-                n_head,
-                d_model,
-                max_length,
-                is_pos=True,
-                slf_attn_bias_flag=True,
-                src_attn_bias_flag=True,
-                enc_output_flag=True,
-                data_shape_flag=True,
-                slf_attn_shape_flag=True,
-                src_attn_shape_flag=True)
+        trg_data_shape, slf_attn_pre_softmax_shape, \
+        slf_attn_post_softmax_shape, src_attn_pre_softmax_shape, \
+        src_attn_post_softmax_shape, enc_output = make_inputs(
+            decoder_input_data_names,
+            n_head,
+            d_model,
+            max_length,
+            is_pos=True,
+            slf_attn_bias_flag=True,
+            src_attn_bias_flag=True,
+            enc_output_flag=True,
+            data_shape_flag=True,
+            slf_attn_shape_flag=True,
+            src_attn_shape_flag=True)
     else:
         trg_word, trg_pos, trg_slf_attn_bias, trg_src_attn_bias, \
-            trg_data_shape, slf_attn_pre_softmax_shape, \
-            slf_attn_post_softmax_shape, src_attn_pre_softmax_shape, \
-            src_attn_post_softmax_shape = dec_inputs
+        trg_data_shape, slf_attn_pre_softmax_shape, \
+        slf_attn_post_softmax_shape, src_attn_pre_softmax_shape, \
+        src_attn_post_softmax_shape = dec_inputs
 
     dec_input = prepare_decoder(
         trg_word,

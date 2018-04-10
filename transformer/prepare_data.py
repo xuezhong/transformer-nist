@@ -39,8 +39,8 @@ def pad_batch_data(insts,
             # This is used to avoid attention on paddings and subsequent
             # words.
             slf_attn_bias_data = np.ones((inst_data.shape[0], max_len, max_len))
-            slf_attn_bias_data = np.triu(slf_attn_bias_data, 1).reshape(
-                [-1, 1, max_len, max_len])
+            slf_attn_bias_data = np.triu(slf_attn_bias_data,
+                                         1).reshape([-1, 1, max_len, max_len])
             slf_attn_bias_data = np.tile(slf_attn_bias_data,
                                          [1, n_head, 1, 1]) * [-1e9]
         else:
@@ -58,7 +58,7 @@ def pad_batch_data(insts,
 
 
 def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
-                        max_length, n_head):
+                        n_head, d_model):
     """
     Put all padded data needed by training into a dict.
     """
@@ -68,6 +68,10 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
         [inst[1] for inst in insts], trg_pad_idx, n_head, is_target=True)
     trg_src_attn_bias = np.tile(src_slf_attn_bias[:, :, ::src_max_len, :],
                                 [1, 1, trg_max_len, 1]).astype("float32")
+
+    # These shape tensors are used in reshape_op.
+    src_data_shape = np.array([len(insts), src_max_len, d_model], dtype="int32")
+    trg_data_shape = np.array([len(insts), trg_max_len, d_model], dtype="int32")
     src_slf_attn_pre_softmax_shape = np.array(
         [-1, src_slf_attn_bias.shape[-1]], dtype="int32")
     src_slf_attn_post_softmax_shape = np.array(
@@ -80,17 +84,19 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
         [-1, trg_src_attn_bias.shape[-1]], dtype="int32")
     trg_src_attn_post_softmax_shape = np.array(
         trg_src_attn_bias.shape, dtype="int32")
+
     lbl_word = pad_batch_data([inst[2] for inst in insts], trg_pad_idx, n_head,
                               False, False, False, False)
     lbl_weight = (lbl_word != trg_pad_idx).astype("float32").reshape([-1, 1])
+
     input_dict = dict(
         zip(input_data_names, [
-            src_word, src_pos, src_slf_attn_bias,
+            src_word, src_pos, src_slf_attn_bias, src_data_shape,
             src_slf_attn_pre_softmax_shape, src_slf_attn_post_softmax_shape,
             trg_word, trg_pos, trg_slf_attn_bias, trg_src_attn_bias,
-            trg_slf_attn_pre_softmax_shape, trg_slf_attn_post_softmax_shape,
-            trg_src_attn_pre_softmax_shape, trg_src_attn_post_softmax_shape,
-            lbl_word, lbl_weight
+            trg_data_shape, trg_slf_attn_pre_softmax_shape,
+            trg_slf_attn_post_softmax_shape, trg_src_attn_pre_softmax_shape,
+            trg_src_attn_post_softmax_shape, lbl_word, lbl_weight
         ]))
     return input_dict
 
@@ -101,23 +107,22 @@ def create_recordio_file(item):
 
     train_data = paddle.batch(reader_creator, batch_size=TrainTaskConfig.batch_size)
     with fluid.recordio_writer.create_recordio_writer(filename,
-                                                      max_num_records=18) as writer:
+                                                      max_num_records=100) as writer:
         for j, batch in enumerate(train_data()):
             if len(batch) != TrainTaskConfig.batch_size:
                 continue
             data_input = prepare_batch_input(
                 batch, encoder_input_data_names + decoder_input_data_names[:-1] +
                        label_data_names, ModelHyperParams.src_pad_idx,
-                ModelHyperParams.trg_pad_idx, ModelHyperParams.max_length,
-                ModelHyperParams.n_head)
+                ModelHyperParams.trg_pad_idx, ModelHyperParams.n_head,
+                ModelHyperParams.d_model)
 
-            for input_name in encoder_input_data_names + decoder_input_data_names + label_data_names:
+            for input_name in encoder_input_data_names + decoder_input_data_names[:-1] + label_data_names:
                 if input_name not in data_input:
                     continue
                 tensor = data_input[input_name]
                 t = fluid.LoDTensor()
                 t.set(tensor, fluid.CPUPlace())
-
                 if i == 0 and j == 0:
                     field_helper.append_field(input_name, tensor.shape, tensor.dtype)
                 writer.append_tensor(t)
@@ -125,9 +130,12 @@ def create_recordio_file(item):
     return field_helper
 
 
-def create_or_get_data(process_num=10):
+def create_or_get_data(process_num=10, single_file=False):
     creators = nist_data_provider.train_creators("data", ModelHyperParams.src_vocab_size,
                                                  ModelHyperParams.trg_vocab_size)
+
+    if single_file:
+        creators = creators[:1]  # drop other files. Make test faster
 
     recordio_files = ["./nist06_batchsize_{0}.part{1}.recordio".format(TrainTaskConfig.batch_size, i) for i in
                       xrange(len(creators))]
@@ -141,7 +149,9 @@ def create_or_get_data(process_num=10):
         items = []
         for i, pair in enumerate(zip(recordio_files, creators)):
             items.append((pair[0], pair[1], i, field_helper))
+
         field_helper = pool.map(create_recordio_file, items)[0]
+
         with open(field_helpers_fn, 'w') as f:
             cPickle.dump(field_helper, f, cPickle.HIGHEST_PROTOCOL)
         return field_helper
