@@ -13,9 +13,9 @@ def position_encoding_init(n_position, d_pos_vec):
     Generate the initial values for the sinusoid position encoding table.
     """
     position_enc = np.array([[
-                                 pos / np.power(10000, 2 * (j // 2) / d_pos_vec)
-                                 for j in range(d_pos_vec)
-                             ] if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
+        pos / np.power(10000, 2 * (j // 2) / d_pos_vec)
+        for j in range(d_pos_vec)
+    ] if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
     position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2])  # dim 2i
     position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2])  # dim 2i+1
     return position_enc.astype("float32")
@@ -45,29 +45,30 @@ def multi_head_attention(queries,
         """
         Add linear projection to queries, keys, and values.
         """
-        q = layers.fc(
-            input=queries,
-            size=d_key * n_head,
-            param_attr=fluid.initializer.Xavier(
-                uniform=False, fan_in=d_model * d_key, fan_out=n_head * d_key),
-            bias_attr=False,
-            num_flatten_dims=2)
-        k = layers.fc(
-            input=keys,
-            size=d_key * n_head,
-            param_attr=fluid.initializer.Xavier(
-                uniform=False, fan_in=d_model * d_key, fan_out=n_head * d_key),
-            bias_attr=False,
-            num_flatten_dims=2)
-        v = layers.fc(
-            input=values,
-            size=d_value * n_head,
-            param_attr=fluid.initializer.Xavier(
-                uniform=False,
-                fan_in=d_model * d_value,
-                fan_out=n_head * d_value),
-            bias_attr=False,
-            num_flatten_dims=2)
+        q = layers.fc(input=queries,
+                      size=d_key * n_head,
+                      param_attr=fluid.initializer.Xavier(
+                          uniform=False,
+                          fan_in=d_model * d_key,
+                          fan_out=n_head * d_key),
+                      bias_attr=False,
+                      num_flatten_dims=2)
+        k = layers.fc(input=keys,
+                      size=d_key * n_head,
+                      param_attr=fluid.initializer.Xavier(
+                          uniform=False,
+                          fan_in=d_model * d_key,
+                          fan_out=n_head * d_key),
+                      bias_attr=False,
+                      num_flatten_dims=2)
+        v = layers.fc(input=values,
+                      size=d_value * n_head,
+                      param_attr=fluid.initializer.Xavier(
+                          uniform=False,
+                          fan_in=d_model * d_value,
+                          fan_out=n_head * d_value),
+                      bias_attr=False,
+                      num_flatten_dims=2)
         return q, k, v
 
     def __split_heads(x, n_head):
@@ -106,15 +107,16 @@ def multi_head_attention(queries,
             x=trans_x,
             shape=map(int, [0, -1, trans_x.shape[2] * trans_x.shape[3]]))
 
-    def scaled_dot_product_attention(q, k, v, attn_bias, d_model, dropout_rate):
+    def scaled_dot_product_attention(q, k, v, attn_bias, d_model,
+                                     dropout_rate):
         """
         Scaled Dot-Product Attention
         """
-        scaled_q = layers.scale(x=q, scale=d_model ** -0.5)
+        scaled_q = layers.scale(x=q, scale=d_model**-0.5)
         product = layers.matmul(x=scaled_q, y=k, transpose_y=True)
         weights = layers.reshape(
-            x=layers.elementwise_add(x=product, y=attn_bias)
-            if attn_bias else product,
+            x=layers.elementwise_add(
+                x=product, y=attn_bias) if attn_bias else product,
             shape=[-1, product.shape[-1]],
             actual_shape=pre_softmax_shape,
             act="softmax")
@@ -138,12 +140,11 @@ def multi_head_attention(queries,
     out = __combine_heads(ctx_multiheads)
 
     # Project back to the model size.
-    proj_out = layers.fc(
-        input=out,
-        size=d_model,
-        param_attr=fluid.initializer.Xavier(uniform=False),
-        bias_attr=False,
-        num_flatten_dims=2)
+    proj_out = layers.fc(input=out,
+                         size=d_model,
+                         param_attr=fluid.initializer.Xavier(uniform=False),
+                         bias_attr=False,
+                         num_flatten_dims=2)
     return proj_out
 
 
@@ -153,19 +154,17 @@ def positionwise_feed_forward(x, d_inner_hid, d_hid):
     This module consists of two linear transformations with a ReLU activation
     in between, which is applied to each position separately and identically.
     """
-    hidden = layers.fc(
-        input=x,
-        size=d_inner_hid,
-        num_flatten_dims=2,
-        param_attr=fluid.initializer.Uniform(
-            low=-(d_hid ** -0.5), high=(d_hid ** -0.5)),
-        act="relu")
-    out = layers.fc(
-        input=hidden,
-        size=d_hid,
-        num_flatten_dims=2,
-        param_attr=fluid.initializer.Uniform(
-            low=-(d_inner_hid ** -0.5), high=(d_inner_hid ** -0.5)))
+    hidden = layers.fc(input=x,
+                       size=d_inner_hid,
+                       num_flatten_dims=2,
+                       param_attr=fluid.initializer.Uniform(
+                           low=-(d_hid**-0.5), high=(d_hid**-0.5)),
+                       act="relu")
+    out = layers.fc(input=hidden,
+                    size=d_hid,
+                    num_flatten_dims=2,
+                    param_attr=fluid.initializer.Uniform(
+                        low=-(d_inner_hid**-0.5), high=(d_inner_hid**-0.5)))
     return out
 
 
@@ -222,7 +221,8 @@ def prepare_encoder(src_word,
         src_pos,
         size=[src_max_len, src_emb_dim],
         padding_idx=pos_pad_idx,
-        param_attr=fluid.ParamAttr(name=pos_enc_param_name, trainable=False))
+        param_attr=fluid.ParamAttr(
+            name=pos_enc_param_name, trainable=False))
     enc_input = src_word_emb + src_pos_enc
     enc_input = layers.reshape(
         x=enc_input,
@@ -291,8 +291,7 @@ def encoder(enc_input,
             d_inner_hid,
             dropout_rate,
             pre_softmax_shape,
-            post_softmax_shape,
-        )
+            post_softmax_shape, )
         enc_input = enc_output
     return enc_output
 
@@ -327,14 +326,12 @@ def decoder_layer(dec_input,
         n_head,
         dropout_rate,
         slf_attn_pre_softmax_shape,
-        slf_attn_post_softmax_shape,
-    )
+        slf_attn_post_softmax_shape, )
     slf_attn_output = post_process_layer(
         dec_input,
         slf_attn_output,
         "dan",  # residual connection + dropout + layer normalization
-        dropout_rate,
-    )
+        dropout_rate, )
     enc_attn_output = multi_head_attention(
         slf_attn_output,
         enc_output,
@@ -346,25 +343,21 @@ def decoder_layer(dec_input,
         n_head,
         dropout_rate,
         src_attn_pre_softmax_shape,
-        src_attn_post_softmax_shape,
-    )
+        src_attn_post_softmax_shape, )
     enc_attn_output = post_process_layer(
         slf_attn_output,
         enc_attn_output,
         "dan",  # residual connection + dropout + layer normalization
-        dropout_rate,
-    )
+        dropout_rate, )
     ffd_output = positionwise_feed_forward(
         enc_attn_output,
         d_inner_hid,
-        d_model,
-    )
+        d_model, )
     dec_output = post_process_layer(
         enc_attn_output,
         ffd_output,
         "dan",  # residual connection + dropout + layer normalization
-        dropout_rate,
-    )
+        dropout_rate, )
     return dec_output
 
 
@@ -401,8 +394,7 @@ def decoder(dec_input,
             slf_attn_pre_softmax_shape,
             slf_attn_post_softmax_shape,
             src_attn_pre_softmax_shape,
-            src_attn_post_softmax_shape,
-        )
+            src_attn_post_softmax_shape, )
         dec_input = dec_output
     return dec_output
 
@@ -528,8 +520,7 @@ def transformer(
         dropout_rate,
         src_pad_idx,
         trg_pad_idx,
-        pos_pad_idx,
-):
+        pos_pad_idx, ):
     enc_inputs = make_inputs(
         encoder_input_data_names,
         n_head,
@@ -554,8 +545,7 @@ def transformer(
         dropout_rate,
         src_pad_idx,
         pos_pad_idx,
-        enc_inputs,
-    )
+        enc_inputs, )
 
     dec_inputs = make_inputs(
         decoder_input_data_names,
@@ -582,8 +572,7 @@ def transformer(
         trg_pad_idx,
         pos_pad_idx,
         dec_inputs,
-        enc_output,
-    )
+        enc_output, )
     # Padding index do not contribute to the total loss. The weights is used to
     # cancel padding index in calculating the loss.
     gold, weights = make_inputs(
@@ -670,8 +659,7 @@ def transformer_pe(
         dropout_rate,
         src_pad_idx,
         pos_pad_idx,
-        field_map=field_map,
-    )
+        field_map=field_map, )
     dec_inputs = make_inputs_parallel_executor(
         field_map,
         decoder_input_data_names,
@@ -698,8 +686,7 @@ def transformer_pe(
         trg_pad_idx,
         pos_pad_idx,
         dec_inputs,
-        enc_output,
-    )
+        enc_output, )
     # Padding index do not contribute to the total loss. The weights is used to
     # cancel padding index in calculating the loss.
     gold, weights = make_inputs_parallel_executor(
@@ -764,8 +751,10 @@ def wrap_encoder(src_vocab_size,
         src_pos = field_map['src_pos']
         src_slf_attn_bias = field_map['src_slf_attn_bias']
         src_data_shape = field_map['src_data_shape']
-        slf_attn_pre_softmax_shape = field_map['src_slf_attn_pre_softmax_shape']
-        slf_attn_post_softmax_shape = field_map['src_slf_attn_post_softmax_shape']
+        slf_attn_pre_softmax_shape = field_map[
+            'src_slf_attn_pre_softmax_shape']
+        slf_attn_post_softmax_shape = field_map[
+            'src_slf_attn_post_softmax_shape']
 
     enc_input = prepare_encoder(
         src_word,
@@ -776,8 +765,7 @@ def wrap_encoder(src_vocab_size,
         max_length,
         dropout_rate,
         pos_pad_idx,
-        src_data_shape,
-    )
+        src_data_shape, )
     enc_output = encoder(
         enc_input,
         src_slf_attn_bias,
@@ -789,8 +777,7 @@ def wrap_encoder(src_vocab_size,
         d_inner_hid,
         dropout_rate,
         slf_attn_pre_softmax_shape,
-        slf_attn_post_softmax_shape,
-    )
+        slf_attn_post_softmax_shape, )
     return enc_output
 
 
@@ -842,8 +829,7 @@ def wrap_decoder(trg_vocab_size,
         max_length,
         dropout_rate,
         pos_pad_idx,
-        trg_data_shape,
-    )
+        trg_data_shape, )
     dec_output = decoder(
         dec_input,
         enc_output,
@@ -859,15 +845,13 @@ def wrap_decoder(trg_vocab_size,
         slf_attn_pre_softmax_shape,
         slf_attn_post_softmax_shape,
         src_attn_pre_softmax_shape,
-        src_attn_post_softmax_shape,
-    )
+        src_attn_post_softmax_shape, )
     # Return logits for training and probs for inference.
     predict = layers.reshape(
-        x=layers.fc(
-            input=dec_output,
-            size=trg_vocab_size,
-            bias_attr=False,
-            num_flatten_dims=2),
+        x=layers.fc(input=dec_output,
+                    size=trg_vocab_size,
+                    bias_attr=False,
+                    num_flatten_dims=2),
         shape=[-1, trg_vocab_size],
         act="softmax" if dec_inputs is None else None)
     return predict

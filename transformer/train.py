@@ -30,7 +30,8 @@ def pad_batch_data(insts,
     return_list += [inst_data.astype("int64").reshape([-1, 1])]
     if return_pos:
         inst_pos = np.array([[
-            pos_i + 1 if w_i != pad_idx else 0 for pos_i, w_i in enumerate(inst)
+            pos_i + 1 if w_i != pad_idx else 0
+            for pos_i, w_i in enumerate(inst)
         ] for inst in inst_data])
 
         return_list += [inst_pos.astype("int64").reshape([-1, 1])]
@@ -38,7 +39,8 @@ def pad_batch_data(insts,
         if is_target:
             # This is used to avoid attention on paddings and subsequent
             # words.
-            slf_attn_bias_data = np.ones((inst_data.shape[0], max_len, max_len))
+            slf_attn_bias_data = np.ones(
+                (inst_data.shape[0], max_len, max_len))
             slf_attn_bias_data = np.triu(slf_attn_bias_data,
                                          1).reshape([-1, 1, max_len, max_len])
             slf_attn_bias_data = np.tile(slf_attn_bias_data,
@@ -70,8 +72,10 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
                                 [1, 1, trg_max_len, 1]).astype("float32")
 
     # These shape tensors are used in reshape_op.
-    src_data_shape = np.array([len(insts), src_max_len, d_model], dtype="int32")
-    trg_data_shape = np.array([len(insts), trg_max_len, d_model], dtype="int32")
+    src_data_shape = np.array(
+        [len(insts), src_max_len, d_model], dtype="int32")
+    trg_data_shape = np.array(
+        [len(insts), trg_max_len, d_model], dtype="int32")
     src_slf_attn_pre_softmax_shape = np.array(
         [-1, src_slf_attn_bias.shape[-1]], dtype="int32")
     src_slf_attn_post_softmax_shape = np.array(
@@ -144,29 +148,28 @@ def main():
         pass_start_time = time.time()
         for batch_id, data in enumerate(train_data()):
             data_input = prepare_batch_input(
-                data, encoder_input_data_names + decoder_input_data_names[:-1] +
-                label_data_names, ModelHyperParams.src_pad_idx,
+                data, encoder_input_data_names + decoder_input_data_names[:-1]
+                + label_data_names, ModelHyperParams.src_pad_idx,
                 ModelHyperParams.trg_pad_idx, ModelHyperParams.n_head,
                 ModelHyperParams.d_model)
             lr_scheduler.update_learning_rate(data_input)
-            outs = exe.run(
-                fluid.framework.default_main_program(),
-                feed=data_input,
-                fetch_list=[sum_cost, avg_cost],
-                use_program_cache=True)
+            outs = exe.run(fluid.framework.default_main_program(),
+                           feed=data_input,
+                           fetch_list=[sum_cost, avg_cost],
+                           use_program_cache=True)
             sum_cost_val, avg_cost_val = np.array(outs[0]), np.array(outs[1])
             print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f" %
                   (pass_id, batch_id, sum_cost_val, avg_cost_val,
                    np.exp([min(avg_cost_val[0], 100)])))
         pass_end_time = time.time()
         time_consumed = pass_end_time - pass_start_time
-        print("pass_id = " + str(pass_id) + " time_consumed = " +
-              str(time_consumed))
+        print("pass_id = " + str(pass_id) + " time_consumed = " + str(
+            time_consumed))
         fluid.io.save_inference_model(
             os.path.join(TrainTaskConfig.model_dir,
                          "pass_" + str(pass_id) + ".infer.model"),
-            encoder_input_data_names + decoder_input_data_names[:-1], [predict],
-            exe)
+            encoder_input_data_names + decoder_input_data_names[:-1],
+            [predict], exe)
 
 
 if __name__ == "__main__":

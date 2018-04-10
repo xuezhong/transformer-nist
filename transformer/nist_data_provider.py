@@ -34,8 +34,8 @@ def __build_dict(data_file, dict_size, save_path, lang="cn"):
         fout.write("%s\n%s\n%s\n%s\n" % (PAD_MARK, START_MARK, END_MARK,
                                          UNK_MARK))
         for idx, word in enumerate(
-                sorted(word_dict.iteritems(), key=lambda x: x[1],
-                       reverse=True)):
+                sorted(
+                    word_dict.iteritems(), key=lambda x: x[1], reverse=True)):
             if idx + 4 == dict_size: break
             fout.write("%s\n" % (word[0]))
 
@@ -45,8 +45,8 @@ def __load_dict(data_file, dict_size, lang, dict_file=None, reverse=False):
                                 dict_size) if dict_file is None else dict_file
     dict_path = os.path.join(DATA_HOME, dict_file)
     data_path = os.path.join(DATA_HOME, data_file)
-    if not os.path.exists(dict_path) or (len(open(dict_path, "r").readlines())
-                                         != dict_size):
+    if not os.path.exists(dict_path) or (
+            len(open(dict_path, "r").readlines()) != dict_size):
         __build_dict(data_path, dict_size, dict_path, lang)
 
     word_dict = {}
@@ -91,9 +91,9 @@ def reader_creator(data_file,
                     if len(line_split) != 2:
                         continue
                     src_words = line_split[src_col].split()
-                    src_ids = [start_id
-                               ] + [src_dict.get(w, unk_id)
-                                    for w in src_words] + [end_id]
+                    src_ids = [start_id] + [
+                        src_dict.get(w, unk_id) for w in src_words
+                    ] + [end_id]
 
                     trg_words = line_split[trg_col].split()
                     trg_ids = [trg_dict.get(w, unk_id) for w in trg_words]
@@ -110,8 +110,7 @@ def reader_creator_with_file(data_file,
                              src_lang,
                              src_dict,
                              trg_dict,
-                             len_filter=200
-                             ):
+                             len_filter=200):
     def reader():
         # the indice for start mark, end mark, and unk are the same in source
         # language and target language. Here uses the source language
@@ -164,14 +163,15 @@ def train_creators(data_dir,
                    len_filter=200):
     src_dict = __load_dict(data_dir, src_dict_size, "cn", src_dict_file)
     trg_dict = __load_dict(data_dir, trg_dict_size, "en", trg_dict_file)
-    data_files = [
-        os.path.join(data_dir, f) for f in os.listdir(data_dir)]
+    data_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir)]
 
-    return [{"data_file": filename,
-             "src_lang": src_lang,
-             "src_dict": src_dict,
-             "trg_dict": trg_dict,
-             "len_filter": len_filter} for filename in data_files]
+    return [{
+        "data_file": filename,
+        "src_lang": src_lang,
+        "src_dict": src_dict,
+        "trg_dict": trg_dict,
+        "len_filter": len_filter
+    } for filename in data_files]
 
 
 test = partial(train, len_filter=100000)

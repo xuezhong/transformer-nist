@@ -15,14 +15,14 @@ def main():
         fileds = field_helper.create_reader(use_open_files=multi_files)
 
         sum_cost, avg_cost, predict, token_num = transformer_pe(
-            fileds,
-            ModelHyperParams.src_vocab_size + 0,
-            ModelHyperParams.trg_vocab_size + 0, ModelHyperParams.max_length + 1,
-            ModelHyperParams.n_layer, ModelHyperParams.n_head,
-            ModelHyperParams.d_key, ModelHyperParams.d_value,
-            ModelHyperParams.d_model, ModelHyperParams.d_inner_hid,
-            ModelHyperParams.dropout, ModelHyperParams.src_pad_idx,
-            ModelHyperParams.trg_pad_idx, ModelHyperParams.pos_pad_idx)
+            fileds, ModelHyperParams.src_vocab_size + 0,
+            ModelHyperParams.trg_vocab_size + 0,
+            ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
+            ModelHyperParams.n_head, ModelHyperParams.d_key,
+            ModelHyperParams.d_value, ModelHyperParams.d_model,
+            ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
+            ModelHyperParams.src_pad_idx, ModelHyperParams.trg_pad_idx,
+            ModelHyperParams.pos_pad_idx)
 
         optimizer = fluid.optimizer.Adam(
             learning_rate=1e-3,
@@ -39,7 +39,8 @@ def main():
 
         for i in xrange(sys.maxint):
             if i % 10 == 0:
-                cost_np = map(numpy.array, exe.run(fetch_list=[sum_cost.name]))[0]
+                cost_np = map(numpy.array,
+                              exe.run(fetch_list=[sum_cost.name]))[0]
                 print 'Batch {0}, Cost {1}'.format(i, cost_np[0])
             else:
                 exe.run(fetch_list=[])

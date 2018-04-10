@@ -30,7 +30,8 @@ def pad_batch_data(insts,
     return_list += [inst_data.astype("int64").reshape([-1, 1])]
     if return_pos:
         inst_pos = np.array([[
-            pos_i + 1 if w_i != pad_idx else 0 for pos_i, w_i in enumerate(inst)
+            pos_i + 1 if w_i != pad_idx else 0
+            for pos_i, w_i in enumerate(inst)
         ] for inst in inst_data])
 
         return_list += [inst_pos.astype("int64").reshape([-1, 1])]
@@ -38,7 +39,8 @@ def pad_batch_data(insts,
         if is_target:
             # This is used to avoid attention on paddings and subsequent
             # words.
-            slf_attn_bias_data = np.ones((inst_data.shape[0], max_len, max_len))
+            slf_attn_bias_data = np.ones(
+                (inst_data.shape[0], max_len, max_len))
             slf_attn_bias_data = np.triu(slf_attn_bias_data,
                                          1).reshape([-1, 1, max_len, max_len])
             slf_attn_bias_data = np.tile(slf_attn_bias_data,
@@ -70,8 +72,10 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
                                 [1, 1, trg_max_len, 1]).astype("float32")
 
     # These shape tensors are used in reshape_op.
-    src_data_shape = np.array([len(insts), src_max_len, d_model], dtype="int32")
-    trg_data_shape = np.array([len(insts), trg_max_len, d_model], dtype="int32")
+    src_data_shape = np.array(
+        [len(insts), src_max_len, d_model], dtype="int32")
+    trg_data_shape = np.array(
+        [len(insts), trg_max_len, d_model], dtype="int32")
     src_slf_attn_pre_softmax_shape = np.array(
         [-1, src_slf_attn_bias.shape[-1]], dtype="int32")
     src_slf_attn_post_softmax_shape = np.array(
@@ -103,45 +107,54 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
 
 def create_recordio_file(item):
     filename, reader_creator, i, field_helper = item
-    reader_creator = nist_data_provider.reader_creator_with_file(**reader_creator)
+    reader_creator = nist_data_provider.reader_creator_with_file(
+        **reader_creator)
 
-    train_data = paddle.batch(reader_creator, batch_size=TrainTaskConfig.batch_size)
-    with fluid.recordio_writer.create_recordio_writer(filename,
-                                                      max_num_records=100) as writer:
+    train_data = paddle.batch(
+        reader_creator, batch_size=TrainTaskConfig.batch_size)
+    with fluid.recordio_writer.create_recordio_writer(
+            filename, max_num_records=100) as writer:
         for j, batch in enumerate(train_data()):
             if len(batch) != TrainTaskConfig.batch_size:
                 continue
             data_input = prepare_batch_input(
-                batch, encoder_input_data_names + decoder_input_data_names[:-1] +
-                       label_data_names, ModelHyperParams.src_pad_idx,
+                batch, encoder_input_data_names + decoder_input_data_names[:-1]
+                + label_data_names, ModelHyperParams.src_pad_idx,
                 ModelHyperParams.trg_pad_idx, ModelHyperParams.n_head,
                 ModelHyperParams.d_model)
 
-            for input_name in encoder_input_data_names + decoder_input_data_names[:-1] + label_data_names:
+            for input_name in encoder_input_data_names + decoder_input_data_names[:
+                                                                                  -1] + label_data_names:
                 if input_name not in data_input:
                     continue
                 tensor = data_input[input_name]
                 t = fluid.LoDTensor()
                 t.set(tensor, fluid.CPUPlace())
                 if i == 0 and j == 0:
-                    field_helper.append_field(input_name, tensor.shape, tensor.dtype)
+                    field_helper.append_field(input_name, tensor.shape,
+                                              tensor.dtype)
                 writer.append_tensor(t)
             writer.complete_append_tensor()
     return field_helper
 
 
 def create_or_get_data(process_num=10, single_file=False):
-    creators = nist_data_provider.train_creators("data", ModelHyperParams.src_vocab_size,
-                                                 ModelHyperParams.trg_vocab_size)
+    creators = nist_data_provider.train_creators(
+        "data", ModelHyperParams.src_vocab_size,
+        ModelHyperParams.trg_vocab_size)
 
     if single_file:
         creators = creators[:1]  # drop other files. Make test faster
 
-    recordio_files = ["./nist06_batchsize_{0}.part{1}.recordio".format(TrainTaskConfig.batch_size, i) for i in
-                      xrange(len(creators))]
-    field_helpers_fn = './nist06_batchsize_{0}.recordio.fields'.format(TrainTaskConfig.batch_size)
-    any_file_not_exist = reduce(lambda acc, path: acc or not os.path.exists(path), [field_helpers_fn] + recordio_files,
-                                False)
+    recordio_files = [
+        "./nist06_batchsize_{0}.part{1}.recordio".format(
+            TrainTaskConfig.batch_size, i) for i in xrange(len(creators))
+    ]
+    field_helpers_fn = './nist06_batchsize_{0}.recordio.fields'.format(
+        TrainTaskConfig.batch_size)
+    any_file_not_exist = reduce(
+        lambda acc, path: acc or not os.path.exists(path),
+        [field_helpers_fn] + recordio_files, False)
     if any_file_not_exist:
         pool = multiprocessing.Pool(process_num)
         field_helper = FieldHelper(recordio_files)

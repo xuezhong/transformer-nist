@@ -24,16 +24,14 @@ class FieldHelper(object):
                 dtypes=self.dtypes,
                 shapes=shapes,
                 thread_num=1,
-                lod_levels=[0] * len(self.shapes)
-            )
+                lod_levels=[0] * len(self.shapes))
 
         else:
             file_obj = fluid.layers.open_recordio_file(
                 filename=self.filenames[0],
                 dtypes=self.dtypes,
                 shapes=shapes,
-                lod_levels=[0] * len(self.shapes)
-            )
+                lod_levels=[0] * len(self.shapes))
 
         vars = fluid.layers.read_file(file_obj)
 
