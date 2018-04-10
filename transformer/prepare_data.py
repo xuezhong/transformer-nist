@@ -1,15 +1,15 @@
-import os
-import time
+import cPickle
 import numpy as np
+import os
 
-import paddle
+import paddle  # .v2 as paddle
 import paddle.fluid as fluid
 
-from model import transformer, position_encoding_init
-from optim import LearningRateScheduler
-from config import TrainTaskConfig, ModelHyperParams, pos_enc_param_names, \
-        encoder_input_data_names, decoder_input_data_names, label_data_names
 import nist_data_provider
+from config import TrainTaskConfig, ModelHyperParams, encoder_input_data_names, decoder_input_data_names, \
+    label_data_names
+from recordio_helper import FieldHelper
+import multiprocessing
 
 
 def pad_batch_data(insts,
@@ -105,72 +105,73 @@ def prepare_batch_input(insts, input_data_names, src_pad_idx, trg_pad_idx,
     return input_dict
 
 
-def main():
-    place = fluid.CUDAPlace(0) if TrainTaskConfig.use_gpu else fluid.CPUPlace()
-    exe = fluid.Executor(place)
-
-    sum_cost, avg_cost, predict, token_num = transformer(
-        ModelHyperParams.src_vocab_size + 0,
-        ModelHyperParams.trg_vocab_size + 0, ModelHyperParams.max_length + 1,
-        ModelHyperParams.n_layer, ModelHyperParams.n_head,
-        ModelHyperParams.d_key, ModelHyperParams.d_value,
-        ModelHyperParams.d_model, ModelHyperParams.d_inner_hid,
-        ModelHyperParams.dropout, ModelHyperParams.src_pad_idx,
-        ModelHyperParams.trg_pad_idx, ModelHyperParams.pos_pad_idx)
-
-    lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
-                                         TrainTaskConfig.warmup_steps, place,
-                                         TrainTaskConfig.learning_rate)
-    optimizer = fluid.optimizer.Adam(
-        learning_rate=lr_scheduler.learning_rate,
-        beta1=TrainTaskConfig.beta1,
-        beta2=TrainTaskConfig.beta2,
-        epsilon=TrainTaskConfig.eps)
-    optimizer.minimize(avg_cost if TrainTaskConfig.use_avg_cost else sum_cost)
+def create_recordio_file(item):
+    filename, reader_creator, i, field_helper = item
+    reader_creator = nist_data_provider.reader_creator_with_file(
+        **reader_creator)
 
     train_data = paddle.batch(
-        paddle.reader.shuffle(
-            nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                     ModelHyperParams.trg_vocab_size),
-            buf_size=100000),
-        batch_size=TrainTaskConfig.batch_size)
-
-    # Initialize the parameters.
-    exe.run(fluid.framework.default_startup_program())
-    for pos_enc_param_name in pos_enc_param_names:
-        pos_enc_param = fluid.global_scope().find_var(
-            pos_enc_param_name).get_tensor()
-        pos_enc_param.set(
-            position_encoding_init(ModelHyperParams.max_length + 1,
-                                   ModelHyperParams.d_model), place)
-
-    for pass_id in xrange(TrainTaskConfig.pass_num):
-        pass_start_time = time.time()
-        for batch_id, data in enumerate(train_data()):
+        reader_creator, batch_size=TrainTaskConfig.batch_size)
+    with fluid.recordio_writer.create_recordio_writer(
+            filename, max_num_records=100) as writer:
+        for j, batch in enumerate(train_data()):
+            if len(batch) != TrainTaskConfig.batch_size:
+                continue
             data_input = prepare_batch_input(
-                data, encoder_input_data_names + decoder_input_data_names[:-1]
+                batch, encoder_input_data_names + decoder_input_data_names[:-1]
                 + label_data_names, ModelHyperParams.src_pad_idx,
                 ModelHyperParams.trg_pad_idx, ModelHyperParams.n_head,
                 ModelHyperParams.d_model)
-            lr_scheduler.update_learning_rate(data_input)
-            outs = exe.run(fluid.framework.default_main_program(),
-                           feed=data_input,
-                           fetch_list=[sum_cost, avg_cost],
-                           use_program_cache=True)
-            sum_cost_val, avg_cost_val = np.array(outs[0]), np.array(outs[1])
-            print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f" %
-                  (pass_id, batch_id, sum_cost_val, avg_cost_val,
-                   np.exp([min(avg_cost_val[0], 100)])))
-        pass_end_time = time.time()
-        time_consumed = pass_end_time - pass_start_time
-        print("pass_id = " + str(pass_id) + " time_consumed = " + str(
-            time_consumed))
-        fluid.io.save_inference_model(
-            os.path.join(TrainTaskConfig.model_dir,
-                         "pass_" + str(pass_id) + ".infer.model"),
-            encoder_input_data_names + decoder_input_data_names[:-1],
-            [predict], exe)
+
+            for input_name in encoder_input_data_names + decoder_input_data_names[:
+                                                                                  -1] + label_data_names:
+                if input_name not in data_input:
+                    continue
+                tensor = data_input[input_name]
+                t = fluid.LoDTensor()
+                t.set(tensor, fluid.CPUPlace())
+                if i == 0 and j == 0:
+                    field_helper.append_field(input_name, tensor.shape,
+                                              tensor.dtype)
+                writer.append_tensor(t)
+            writer.complete_append_tensor()
+    return field_helper
+
+
+def create_or_get_data(process_num=10, single_file=False):
+    creators = nist_data_provider.train_creators(
+        "data", ModelHyperParams.src_vocab_size,
+        ModelHyperParams.trg_vocab_size)
+
+    if single_file:
+        creators = creators[:1]  # drop other files. Make test faster
+
+    recordio_files = [
+        "./nist06_batchsize_{0}.part{1}.recordio".format(
+            TrainTaskConfig.batch_size, i) for i in xrange(len(creators))
+    ]
+    field_helpers_fn = './nist06_batchsize_{0}.recordio.fields'.format(
+        TrainTaskConfig.batch_size)
+    any_file_not_exist = reduce(
+        lambda acc, path: acc or not os.path.exists(path),
+        [field_helpers_fn] + recordio_files, False)
+    if any_file_not_exist:
+        pool = multiprocessing.Pool(process_num)
+        field_helper = FieldHelper(recordio_files)
+
+        items = []
+        for i, pair in enumerate(zip(recordio_files, creators)):
+            items.append((pair[0], pair[1], i, field_helper))
+
+        field_helper = pool.map(create_recordio_file, items)[0]
+
+        with open(field_helpers_fn, 'w') as f:
+            cPickle.dump(field_helper, f, cPickle.HIGHEST_PROTOCOL)
+        return field_helper
+    else:
+        with open(field_helpers_fn, 'r') as f:
+            return cPickle.load(f)
 
 
 if __name__ == "__main__":
-    main()
+    create_or_get_data()

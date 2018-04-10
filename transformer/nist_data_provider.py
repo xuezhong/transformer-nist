@@ -8,7 +8,7 @@ __all__ = [
     "get_dict",
 ]
 
-DATA_HOME = "/root/nist06/"
+DATA_HOME = "./"
 
 PAD_MARK = "_PAD"
 START_MARK = "_GO"
@@ -34,8 +34,8 @@ def __build_dict(data_file, dict_size, save_path, lang="cn"):
         fout.write("%s\n%s\n%s\n%s\n" % (PAD_MARK, START_MARK, END_MARK,
                                          UNK_MARK))
         for idx, word in enumerate(
-                sorted(word_dict.iteritems(), key=lambda x: x[1],
-                       reverse=True)):
+                sorted(
+                    word_dict.iteritems(), key=lambda x: x[1], reverse=True)):
             if idx + 4 == dict_size: break
             fout.write("%s\n" % (word[0]))
 
@@ -45,8 +45,8 @@ def __load_dict(data_file, dict_size, lang, dict_file=None, reverse=False):
                                 dict_size) if dict_file is None else dict_file
     dict_path = os.path.join(DATA_HOME, dict_file)
     data_path = os.path.join(DATA_HOME, data_file)
-    if not os.path.exists(dict_path) or (len(open(dict_path, "r").readlines())
-                                         != dict_size):
+    if not os.path.exists(dict_path) or (
+            len(open(dict_path, "r").readlines()) != dict_size):
         __build_dict(data_path, dict_size, dict_path, lang)
 
     word_dict = {}
@@ -91,9 +91,9 @@ def reader_creator(data_file,
                     if len(line_split) != 2:
                         continue
                     src_words = line_split[src_col].split()
-                    src_ids = [start_id
-                               ] + [src_dict.get(w, unk_id)
-                                    for w in src_words] + [end_id]
+                    src_ids = [start_id] + [
+                        src_dict.get(w, unk_id) for w in src_words
+                    ] + [end_id]
 
                     trg_words = line_split[trg_col].split()
                     trg_ids = [trg_dict.get(w, unk_id) for w in trg_words]
@@ -106,6 +106,43 @@ def reader_creator(data_file,
     return reader
 
 
+def reader_creator_with_file(data_file,
+                             src_lang,
+                             src_dict,
+                             trg_dict,
+                             len_filter=200):
+    def reader():
+        # the indice for start mark, end mark, and unk are the same in source
+        # language and target language. Here uses the source language
+        # dictionary to determine their indices.
+        start_id = src_dict[START_MARK]
+        end_id = src_dict[END_MARK]
+        unk_id = src_dict[UNK_MARK]
+
+        src_col = 0 if src_lang == "cn" else 1
+        trg_col = 1 - src_col
+
+        with open(data_file, mode="r") as f:
+            for line in f.readlines():
+                line_split = line.strip().split("\t")
+                if len(line_split) != 2:
+                    continue
+                src_words = line_split[src_col].split()
+                src_ids = [start_id
+                           ] + [src_dict.get(w, unk_id)
+                                for w in src_words] + [end_id]
+
+                trg_words = line_split[trg_col].split()
+                trg_ids = [trg_dict.get(w, unk_id) for w in trg_words]
+
+                trg_ids_next = trg_ids + [end_id]
+                trg_ids = [start_id] + trg_ids
+                if len(src_words) + len(trg_words) < len_filter:
+                    yield src_ids, trg_ids, trg_ids_next
+
+    return reader
+
+
 def train(data_file,
           src_dict_size,
           trg_dict_size,
@@ -113,9 +150,28 @@ def train(data_file,
           src_dict_file=None,
           trg_dict_file=None,
           len_filter=200):
-
     return reader_creator(data_file, src_lang, src_dict_size, trg_dict_size,
                           src_dict_file, trg_dict_file, len_filter)
+
+
+def train_creators(data_dir,
+                   src_dict_size,
+                   trg_dict_size,
+                   src_lang="cn",
+                   src_dict_file=None,
+                   trg_dict_file=None,
+                   len_filter=200):
+    src_dict = __load_dict(data_dir, src_dict_size, "cn", src_dict_file)
+    trg_dict = __load_dict(data_dir, trg_dict_size, "en", trg_dict_file)
+    data_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir)]
+
+    return [{
+        "data_file": filename,
+        "src_lang": src_lang,
+        "src_dict": src_dict,
+        "trg_dict": trg_dict,
+        "len_filter": len_filter
+    } for filename in data_files]
 
 
 test = partial(train, len_filter=100000)

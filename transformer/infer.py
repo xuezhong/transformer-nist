@@ -47,18 +47,19 @@ def translate_batch(exe,
         return_max_len=False)
     # Append the data shape input to reshape the output of embedding layer.
     enc_in_data = enc_in_data + [
-        np.array([-1, enc_in_data[2].shape[-1], d_model], dtype="int32")
+        np.array(
+            [-1, enc_in_data[2].shape[-1], d_model], dtype="int32")
     ]
     # Append the shape inputs to reshape before and after softmax in encoder
     # self attention.
     enc_in_data = enc_in_data + [
-        np.array([-1, enc_in_data[2].shape[-1]], dtype="int32"),
-        np.array(enc_in_data[2].shape, dtype="int32")
+        np.array(
+            [-1, enc_in_data[2].shape[-1]], dtype="int32"), np.array(
+                enc_in_data[2].shape, dtype="int32")
     ]
-    enc_output = exe.run(
-        encoder,
-        feed=dict(zip(enc_in_names, enc_in_data)),
-        fetch_list=enc_out_names)[0]
+    enc_output = exe.run(encoder,
+                         feed=dict(zip(enc_in_names, enc_in_data)),
+                         fetch_list=enc_out_names)[0]
 
     # Beam Search.
     # To store the beam info.
@@ -162,8 +163,8 @@ def translate_batch(exe,
             (np.array(active_beams) * beam_size)[:, np.newaxis] +
             np.array(range(beam_size))[np.newaxis, :]).flatten()
         # This is used to remove attention on subsequent words.
-        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size, trg_cur_len,
-                                     trg_cur_len))
+        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size,
+                                     trg_cur_len, trg_cur_len))
         trg_slf_attn_bias = np.triu(trg_slf_attn_bias, 1).reshape(
             [-1, 1, trg_cur_len, trg_cur_len])
         trg_slf_attn_bias = (np.tile(trg_slf_attn_bias, [1, n_head, 1, 1]) *
@@ -197,13 +198,12 @@ def translate_batch(exe,
     dec_in_data = init_dec_in_data(batch_size, beam_size, enc_in_data,
                                    enc_output)
     for i in range(max_length):
-        predict_all = exe.run(
-            decoder,
-            feed=dict(zip(dec_in_names, dec_in_data)),
-            fetch_list=dec_out_names)[0]
+        predict_all = exe.run(decoder,
+                              feed=dict(zip(dec_in_names, dec_in_data)),
+                              fetch_list=dec_out_names)[0]
         predict_all = np.log(
-            predict_all.reshape([len(beam_inst_map) * beam_size, i + 1,
-                                 -1])[:, -1, :])
+            predict_all.reshape([len(beam_inst_map) * beam_size, i + 1, -1])
+            [:, -1, :])
         predict_all = (predict_all + scores[active_beams].reshape(
             [len(beam_inst_map) * beam_size, -1])).reshape(
                 [len(beam_inst_map), beam_size, -1])
@@ -217,12 +217,12 @@ def translate_batch(exe,
             predict = (predict_all[inst_idx, :, :]
                        if i != 0 else predict_all[inst_idx, 0, :]).flatten()
             top_k_indice = np.argpartition(predict, -beam_size)[-beam_size:]
-            top_scores_ids = top_k_indice[np.argsort(
-                predict[top_k_indice])[::-1]]
+            top_scores_ids = top_k_indice[np.argsort(predict[top_k_indice])
+                                          [::-1]]
             top_scores = predict[top_scores_ids]
             scores[beam_idx] = top_scores
-            prev_branchs[beam_idx].append(
-                top_scores_ids / predict_all.shape[-1])
+            prev_branchs[beam_idx].append(top_scores_ids /
+                                          predict_all.shape[-1])
             next_ids[beam_idx].append(top_scores_ids % predict_all.shape[-1])
             if next_ids[beam_idx][-1][0] != eos_idx:
                 active_beams.append(beam_idx)
@@ -296,7 +296,8 @@ def main():
         target_vars=[predict], main_program=decoder_program)
 
     test_data = paddle.batch(
-        nist_data_provider.test("nist06n.test", ModelHyperParams.src_vocab_size,
+        nist_data_provider.test("nist06n.test",
+                                ModelHyperParams.src_vocab_size,
                                 ModelHyperParams.trg_vocab_size),
         batch_size=InferTaskConfig.batch_size)
 

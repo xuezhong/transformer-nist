@@ -4,7 +4,7 @@ class TrainTaskConfig(object):
     pass_num = 100
 
     # the number of sequences contained in a mini-batch.
-    batch_size = 56
+    batch_size = 8  # there are memleak in Op::DataTransform. Need double buffer
 
     # the hyper parameters for Adam optimizer.
     learning_rate = 0.001
@@ -95,8 +95,7 @@ class ModelHyperParams(object):
 # Names of position encoding table which will be initialized externally.
 pos_enc_param_names = (
     "src_pos_enc_table",
-    "trg_pos_enc_table",
-)
+    "trg_pos_enc_table", )
 
 # Names of all data layers in encoder listed in order.
 encoder_input_data_names = (
@@ -105,8 +104,7 @@ encoder_input_data_names = (
     "src_slf_attn_bias",
     "src_data_shape",
     "src_slf_attn_pre_softmax_shape",
-    "src_slf_attn_post_softmax_shape",
-)
+    "src_slf_attn_post_softmax_shape", )
 
 # Names of all data layers in decoder listed in order.
 decoder_input_data_names = (
@@ -119,11 +117,37 @@ decoder_input_data_names = (
     "trg_slf_attn_post_softmax_shape",
     "trg_src_attn_pre_softmax_shape",
     "trg_src_attn_post_softmax_shape",
-    "enc_output",
-)
+    "enc_output", )
 
 # Names of label related data layers listed in order.
 label_data_names = (
     "lbl_word",
-    "lbl_weight",
-)
+    "lbl_weight", )
+
+data_shapes = {
+    "src_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "src_pos": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "src_slf_attn_bias":
+    (1, ModelHyperParams.n_head, (ModelHyperParams.max_length + 1),
+     (ModelHyperParams.max_length + 1)),
+    "src_data_shape": (3L, ),
+    "src_slf_attn_pre_softmax_shape": (2L, ),
+    "src_slf_attn_post_softmax_shape": (4L, ),
+    "trg_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "trg_pos": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "trg_slf_attn_bias": (1, ModelHyperParams.n_head,
+                          (ModelHyperParams.max_length + 1),
+                          (ModelHyperParams.max_length + 1)),
+    "trg_src_attn_bias": (1, ModelHyperParams.n_head,
+                          (ModelHyperParams.max_length + 1),
+                          (ModelHyperParams.max_length + 1)),
+    "trg_data_shape": (3L, ),
+    "trg_slf_attn_pre_softmax_shape": (2L, ),
+    "trg_slf_attn_post_softmax_shape": (4L, ),
+    "trg_src_attn_pre_softmax_shape": (2L, ),
+    "trg_src_attn_post_softmax_shape": (4L, ),
+    "enc_output":
+    (1, (ModelHyperParams.max_length + 1), ModelHyperParams.d_model),
+    "lbl_word": (1 * (ModelHyperParams.max_length + 1), 1L),
+    "lbl_weight": (1 * (ModelHyperParams.max_length + 1), 1L),
+}

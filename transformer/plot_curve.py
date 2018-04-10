@@ -3,11 +3,13 @@ import distutils.util
 import numpy as np
 import re
 
+
 def print_arguments(args):
     print('-----------  Configuration Arguments -----------')
     for arg, value in sorted(vars(args).iteritems()):
         print('%s: %s' % (arg, value))
     print('------------------------------------------------')
+
 
 def log_info(s):
     try:
@@ -16,6 +18,7 @@ def log_info(s):
         raise argparse.ArgumentTypeError('Format of log info '
                                          'should be "log_file:log_label".')
 
+
 parser = argparse.ArgumentParser("Tools to plot learning curves.")
 parser.add_argument(
     '--log_infos',
@@ -23,7 +26,7 @@ parser.add_argument(
     nargs='+',
     required=True,
     help='Log infos to indicate whose curves to plot. '
-         'Format is "log_file:log_label".')
+    'Format is "log_file:log_label".')
 parser.add_argument(
     '--plot_item',
     type=str,
@@ -52,6 +55,7 @@ if args.whether_show == False:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+
 def item_to_name(item):
     if item == 'sum loss':
         return 'SUM Loss'
@@ -59,6 +63,7 @@ def item_to_name(item):
         return 'AVG Loss'
     elif item == 'ppl':
         return 'PPL'
+
 
 def parse_log(log_file, item):
     iter_num = 0
@@ -80,6 +85,7 @@ def parse_log(log_file, item):
 
     return np.array(train_item), np.array(val_item)
 
+
 fig = plt.figure(figsize=(8, 6))
 ax = fig.add_subplot(111)
 
@@ -92,19 +98,21 @@ for log_info in args.log_infos:
     if args.plot_validation and len(val_item) > 0:
         whether_plot_val = True
 
-    plt.plot(train_item[:, 0],
-             train_item[:, 1],
-             label=log_label + '-' + item_to_name(args.plot_item),
-             linewidth=0.5)
+    plt.plot(
+        train_item[:, 0],
+        train_item[:, 1],
+        label=log_label + '-' + item_to_name(args.plot_item),
+        linewidth=0.5)
 
     if whether_plot_val:
-        plt.plot(val_item[:, 0],
-                 val_item[:, 1],
-                 label=log_label + '-' + 'Val ' + item_to_name(args.plot_item),
-                 linewidth=1.0,
-                 linestyle='-.')
+        plt.plot(
+            val_item[:, 0],
+            val_item[:, 1],
+            label=log_label + '-' + 'Val ' + item_to_name(args.plot_item),
+            linewidth=1.0,
+            linestyle='-.')
 
-colormap = plt.cm.gist_ncar #nipy_spectral, Set1,Paired
+colormap = plt.cm.gist_ncar  #nipy_spectral, Set1,Paired
 
 colors = np.linspace(0.1, 0.8, len(ax.lines))
 colors = [colormap(i) for i in colors]
