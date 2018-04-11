@@ -131,8 +131,7 @@ def create_recordio_file(item):
                 t = fluid.LoDTensor()
                 t.set(tensor, fluid.CPUPlace())
                 if i == 0 and j == 0:
-                    field_helper.append_field(input_name, tensor.shape,
-                                              tensor.dtype)
+                    field_helper.append_field(input_name, tensor.dtype)
                 writer.append_tensor(t)
             writer.complete_append_tensor()
     return field_helper
@@ -164,6 +163,7 @@ def create_or_get_data(process_num=10, single_file=False):
             items.append((pair[0], pair[1], i, field_helper))
 
         field_helper = pool.map(create_recordio_file, items)[0]
+        #create_recordio_file(items[0])
 
         with open(field_helpers_fn, 'w') as f:
             cPickle.dump(field_helper, f, cPickle.HIGHEST_PROTOCOL)
