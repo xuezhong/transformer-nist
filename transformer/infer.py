@@ -9,7 +9,6 @@ from model import wrap_decoder as decoder
 from config import InferTaskConfig, ModelHyperParams, \
         encoder_input_data_names, decoder_input_data_names
 from train import pad_batch_data
-import nist_data_provider
 
 
 def translate_batch(exe,
@@ -42,7 +41,7 @@ def translate_batch(exe,
         src_pad_idx,
         n_head,
         is_target=False,
-        return_pos=True,
+        is_label=False,
         return_attn_bias=True,
         return_max_len=False)
     # Append the data shape input to reshape the output of embedding layer.
@@ -163,8 +162,8 @@ def translate_batch(exe,
             (np.array(active_beams) * beam_size)[:, np.newaxis] +
             np.array(range(beam_size))[np.newaxis, :]).flatten()
         # This is used to remove attention on subsequent words.
-        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size,
-                                     trg_cur_len, trg_cur_len))
+        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size, trg_cur_len,
+                                     trg_cur_len))
         trg_slf_attn_bias = np.triu(trg_slf_attn_bias, 1).reshape(
             [-1, 1, trg_cur_len, trg_cur_len])
         trg_slf_attn_bias = (np.tile(trg_slf_attn_bias, [1, n_head, 1, 1]) *
@@ -217,8 +216,8 @@ def translate_batch(exe,
             predict = (predict_all[inst_idx, :, :]
                        if i != 0 else predict_all[inst_idx, 0, :]).flatten()
             top_k_indice = np.argpartition(predict, -beam_size)[-beam_size:]
-            top_scores_ids = top_k_indice[np.argsort(predict[top_k_indice])
-                                          [::-1]]
+            top_scores_ids = top_k_indice[np.argsort(predict[top_k_indice])[::
+                                                                            -1]]
             top_scores = predict[top_scores_ids]
             scores[beam_idx] = top_scores
             prev_branchs[beam_idx].append(top_scores_ids /
@@ -251,22 +250,20 @@ def main():
     encoder_program = fluid.Program()
     with fluid.program_guard(main_program=encoder_program):
         enc_output = encoder(
-            ModelHyperParams.src_vocab_size + 0,
-            ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
-            ModelHyperParams.n_head, ModelHyperParams.d_key,
-            ModelHyperParams.d_value, ModelHyperParams.d_model,
-            ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
-            ModelHyperParams.src_pad_idx, ModelHyperParams.pos_pad_idx)
+            ModelHyperParams.src_vocab_size, ModelHyperParams.max_length + 1,
+            ModelHyperParams.n_layer, ModelHyperParams.n_head,
+            ModelHyperParams.d_key, ModelHyperParams.d_value,
+            ModelHyperParams.d_model, ModelHyperParams.d_inner_hid,
+            ModelHyperParams.dropout)
 
     decoder_program = fluid.Program()
     with fluid.program_guard(main_program=decoder_program):
         predict = decoder(
-            ModelHyperParams.trg_vocab_size + 0,
-            ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
-            ModelHyperParams.n_head, ModelHyperParams.d_key,
-            ModelHyperParams.d_value, ModelHyperParams.d_model,
-            ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
-            ModelHyperParams.trg_pad_idx, ModelHyperParams.pos_pad_idx)
+            ModelHyperParams.trg_vocab_size, ModelHyperParams.max_length + 1,
+            ModelHyperParams.n_layer, ModelHyperParams.n_head,
+            ModelHyperParams.d_key, ModelHyperParams.d_value,
+            ModelHyperParams.d_model, ModelHyperParams.d_inner_hid,
+            ModelHyperParams.dropout)
 
     # Load model parameters of encoder and decoder separately from the saved
     # transformer model.
@@ -296,16 +293,12 @@ def main():
         target_vars=[predict], main_program=decoder_program)
 
     test_data = paddle.batch(
-        nist_data_provider.test("nist06n.test",
-                                ModelHyperParams.src_vocab_size,
-                                ModelHyperParams.trg_vocab_size),
+        paddle.dataset.wmt16.test(ModelHyperParams.src_vocab_size,
+                                  ModelHyperParams.trg_vocab_size),
         batch_size=InferTaskConfig.batch_size)
 
-    trg_idx2word = nist_data_provider.get_dict(
-        "data",
-        dict_size=ModelHyperParams.trg_vocab_size,
-        lang="en",
-        reverse=True)
+    trg_idx2word = paddle.dataset.wmt16.get_dict(
+        "de", dict_size=ModelHyperParams.trg_vocab_size, reverse=True)
 
     def post_process_seq(seq,
                          bos_idx=ModelHyperParams.bos_idx,
@@ -329,19 +322,22 @@ def main():
 
     for batch_id, data in enumerate(test_data()):
         batch_seqs, batch_scores = translate_batch(
-            exe, [item[0] for item in data],
+            exe,
+            [item[0] for item in data],
             encoder_program,
-            encoder_input_data_names, [enc_output.name],
+            encoder_input_data_names,
+            [enc_output.name],
             decoder_program,
-            decoder_input_data_names, [predict.name],
+            decoder_input_data_names,
+            [predict.name],
             InferTaskConfig.beam_size,
             InferTaskConfig.max_length,
             InferTaskConfig.n_best,
             len(data),
             ModelHyperParams.n_head,
             ModelHyperParams.d_model,
-            ModelHyperParams.src_pad_idx,
-            ModelHyperParams.trg_pad_idx,
+            ModelHyperParams.eos_idx,  # Use eos_idx to pad.
+            ModelHyperParams.eos_idx,  # Use eos_idx to pad.
             ModelHyperParams.bos_idx,
             ModelHyperParams.eos_idx,
             ModelHyperParams.unk_idx,
@@ -356,3 +352,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
