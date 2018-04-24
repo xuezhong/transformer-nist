@@ -6,8 +6,7 @@ import paddle.fluid as fluid
 import model
 from model import wrap_encoder as encoder
 from model import wrap_decoder as decoder
-from config import InferTaskConfig, ModelHyperParams, \
-        encoder_input_data_names, decoder_input_data_names
+from config import *
 from train import pad_batch_data
 
 
@@ -162,8 +161,8 @@ def translate_batch(exe,
             (np.array(active_beams) * beam_size)[:, np.newaxis] +
             np.array(range(beam_size))[np.newaxis, :]).flatten()
         # This is used to remove attention on subsequent words.
-        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size, trg_cur_len,
-                                     trg_cur_len))
+        trg_slf_attn_bias = np.ones((len(active_beams) * beam_size,
+                                     trg_cur_len, trg_cur_len))
         trg_slf_attn_bias = np.triu(trg_slf_attn_bias, 1).reshape(
             [-1, 1, trg_cur_len, trg_cur_len])
         trg_slf_attn_bias = (np.tile(trg_slf_attn_bias, [1, n_head, 1, 1]) *
@@ -216,8 +215,8 @@ def translate_batch(exe,
             predict = (predict_all[inst_idx, :, :]
                        if i != 0 else predict_all[inst_idx, 0, :]).flatten()
             top_k_indice = np.argpartition(predict, -beam_size)[-beam_size:]
-            top_scores_ids = top_k_indice[np.argsort(predict[top_k_indice])[::
-                                                                            -1]]
+            top_scores_ids = top_k_indice[np.argsort(predict[top_k_indice])
+                                          [::-1]]
             top_scores = predict[top_scores_ids]
             scores[beam_idx] = top_scores
             prev_branchs[beam_idx].append(top_scores_ids /
@@ -292,6 +291,7 @@ def main():
     decoder_program = fluid.io.get_inference_program(
         target_vars=[predict], main_program=decoder_program)
 
+
     test_data = paddle.batch(
         paddle.dataset.wmt16.test(ModelHyperParams.src_vocab_size,
                                   ModelHyperParams.trg_vocab_size),
@@ -325,10 +325,10 @@ def main():
             exe,
             [item[0] for item in data],
             encoder_program,
-            encoder_input_data_names,
+            encoder_data_input_fields + encoder_util_input_fields,
             [enc_output.name],
             decoder_program,
-            decoder_input_data_names,
+            decoder_data_input_fields[:-1] + decoder_util_input_fields + (decoder_data_input_fields[-1],),
             [predict.name],
             InferTaskConfig.beam_size,
             InferTaskConfig.max_length,
@@ -352,4 +352,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

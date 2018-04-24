@@ -24,15 +24,17 @@ def pad_batch_data(insts,
     """
     return_list = []
     max_len = max(len(inst) for inst in insts)
-    num_token = reduce(lambda x,y:x+y, [len(inst) for inst in insts]) if return_num_token else 0
+    num_token = reduce(
+        lambda x, y: x + y,
+        [len(inst) for inst in insts]) if return_num_token else 0
     # Any token included in dict can be used to pad, since the paddings' loss
     # will be masked out by weights and make no effect on parameter gradients.
     inst_data = np.array(
         [inst + [pad_idx] * (max_len - len(inst)) for inst in insts])
     return_list += [inst_data.astype("int64").reshape([-1, 1])]
     if is_label:  # label weight
-        inst_weight = np.array(
-            [[1.] * len(inst) + [0.] * (max_len - len(inst)) for inst in insts])
+        inst_weight = np.array([[1.] * len(inst) + [0.] * (max_len - len(inst))
+                                for inst in insts])
         return_list += [inst_weight.astype("float32").reshape([-1, 1])]
     else:  # position data
         inst_pos = np.array([
@@ -44,7 +46,8 @@ def pad_batch_data(insts,
         if is_target:
             # This is used to avoid attention on paddings and subsequent
             # words.
-            slf_attn_bias_data = np.ones((inst_data.shape[0], max_len, max_len))
+            slf_attn_bias_data = np.ones(
+                (inst_data.shape[0], max_len, max_len))
             slf_attn_bias_data = np.triu(slf_attn_bias_data, 1).reshape(
                 [-1, 1, max_len, max_len])
             slf_attn_bias_data = np.tile(slf_attn_bias_data,
@@ -115,7 +118,8 @@ def prepare_batch_input(insts, data_input_names, util_input_names, src_pad_idx,
             trg_slf_attn_pre_softmax_shape, trg_slf_attn_post_softmax_shape,
             trg_src_attn_pre_softmax_shape, trg_src_attn_post_softmax_shape
         ]))
-    return data_input_dict, util_input_dict, np.asarray([num_token], dtype="float32")
+    return data_input_dict, util_input_dict, np.asarray(
+        [num_token], dtype="float32")
 
 
 def read_multiple(reader, count):
@@ -142,7 +146,8 @@ def main():
         ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
         ModelHyperParams.n_head, ModelHyperParams.d_key,
         ModelHyperParams.d_value, ModelHyperParams.d_model,
-        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout, TrainTaskConfig.label_smooth_eps)
+        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
+        TrainTaskConfig.label_smooth_eps)
 
     lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
                                          TrainTaskConfig.warmup_steps,
@@ -152,8 +157,9 @@ def main():
         beta1=TrainTaskConfig.beta1,
         beta2=TrainTaskConfig.beta2,
         epsilon=TrainTaskConfig.eps)
-    bp_cost = avg_cost if TrainTaskConfig.use_avg_cost else sum_cost 
     optimizer.minimize(sum_cost)
+
+    dev_count = fluid.core.get_cuda_device_count()
 
     train_data = paddle.batch(
         paddle.reader.shuffle(
@@ -196,24 +202,26 @@ def main():
         return test_avg_cost, test_ppl
 
     # Initialize the parameters.
-    exe.run(fluid.framework.default_startup_program())
+    if TrainTaskConfig.ckpt_path:
+        fluid.io.load_persistables(exe, TrainTaskConfig.ckpt_path)
+        lr_scheduler.current_steps = TrainTaskConfig.start_step
+    else:
+        exe.run(fluid.framework.default_startup_program())
 
     data_input_names = encoder_data_input_fields + decoder_data_input_fields[:
-                                                                             -1] + label_data_names
+                                                                             -1] + label_data_input_fields
     util_input_names = encoder_util_input_fields + decoder_util_input_fields
 
     train_exe = fluid.ParallelExecutor(
-        use_cuda=TrainTaskConfig.use_gpu,
-        loss_name=bp_cost.name)
+        use_cuda=TrainTaskConfig.use_gpu, loss_name=sum_cost.name, customize_loss_grad=True)
 
     test_exe = fluid.ParallelExecutor(
         use_cuda=TrainTaskConfig.use_gpu, main_program=test_program, share_vars_from=train_exe)
 
-    dev_count = fluid.core.get_cuda_device_count()
-
 
     init = False
     train_data = read_multiple(reader=train_data, count=dev_count)
+
     for pass_id in xrange(TrainTaskConfig.pass_num):
         pass_start_time = time.time()
         for batch_id, data in enumerate(train_data()):
@@ -237,7 +245,10 @@ def main():
                             ModelHyperParams.d_model)
                         feed_list[place_id][pos_enc_param_name] = tensor
             for feed_dict in feed_list:
-                feed_dict[bp_cost.name + "@GRAD"] = 1. / total_num_token if TrainTaskConfig.use_avg_cost else np.asarray([1.], dtype="float32")
+                feed_dict[
+                    sum_cost.name +
+                    "@GRAD"] = 1. / total_num_token if TrainTaskConfig.use_avg_cost else np.asarray(
+                        [1.], dtype="float32")
             outs = train_exe.run(fetch_list=[sum_cost.name, token_num.name],
                                  feed=feed_list)
             sum_cost_val, token_num_val = np.array(outs[0]), np.array(outs[1])
@@ -253,12 +264,15 @@ def main():
         val_avg_cost, val_ppl = test(test_exe)
         pass_end_time = time.time()
         time_consumed = pass_end_time - pass_start_time
-        print("epoch: %d, val avg loss: %f, val ppl: %f, "
-              "consumed %fs" % (pass_id, val_avg_cost, val_ppl, time_consumed))
+        print("pass_id = " + str(pass_id) + " time_consumed = " + str(
+            time_consumed))
+        fluid.io.save_persistables(exe,
+            os.path.join(TrainTaskConfig.ckpt_dir,
+                         "pass_" + str(pass_id) + ".checkpoint"))
         fluid.io.save_inference_model(
             os.path.join(TrainTaskConfig.model_dir,
                          "pass_" + str(pass_id) + ".infer.model"),
-            encoder_input_data_names + decoder_input_data_names[:-1],
+            data_input_names[:-2] + util_input_names,
             [predict], exe)
 
 
