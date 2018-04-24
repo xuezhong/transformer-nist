@@ -8,7 +8,7 @@ import paddle.fluid as fluid
 from model import transformer, position_encoding_init
 from optim import LearningRateScheduler
 from config import *
-import nist_data_provider
+import data_util
 
 
 def pad_batch_data(insts,
@@ -126,7 +126,7 @@ def prepare_batch_input(insts, data_input_names, util_input_names, src_pad_idx,
 def read_multiple(reader, count):
     def __impl__():
         res = []
-        for item in reader():
+        for item in reader:
             res.append(item)
             if len(res) == count:
                 yield res
@@ -161,12 +161,15 @@ def main():
     optimizer.minimize(sum_cost)
 
     dev_count = fluid.core.get_cuda_device_count()
-    train_data = paddle.batch(
-        paddle.reader.shuffle(
-            nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                     ModelHyperParams.trg_vocab_size),
-            buf_size=100000),
-        batch_size=TrainTaskConfig.batch_size)
+
+    train_data = data_util.DataLoader(
+        src_vocab_fpath="./cn_30001.dict",
+        trg_vocab_fpath="./en_30001.dict",
+        fpattern="/root/nist06/data/part-*",
+        batch_size=TrainTaskConfig.batch_size * dev_count,
+        token_batch_size=TrainTaskConfig.token_batch_size,
+        sort_by_length=TrainTaskConfig.sort_by_length,
+        shuffle=True)
 
     # Initialize the parameters.
     if TrainTaskConfig.ckpt_path:
@@ -183,16 +186,22 @@ def main():
         use_cuda=TrainTaskConfig.use_gpu, loss_name=sum_cost.name, customize_loss_grad=True)
 
 
-    init = False
-    train_data = read_multiple(reader=train_data, count=dev_count)
+    def split_data(data, num_part=dev_count):
+        if len(data) == num_part:
+            return data
+        data = data[0]
+        inst_num_per_part = len(data) // num_part
+        return [data[inst_num_per_part * i : inst_num_per_part * (i + 1)] for i in range(num_part)]
+    train_data = read_multiple(reader=train_data, count=dev_count if TrainTaskConfig.token_batch_size else 1)
 
+    init = False
     for pass_id in xrange(TrainTaskConfig.pass_num):
         pass_start_time = time.time()
         for batch_id, data in enumerate(train_data()):
             feed_list = []
             total_num_token = 0
             lr_rate = lr_scheduler.update_learning_rate()
-            for place_id, data_buffer in enumerate(data):
+            for place_id, data_buffer in enumerate(split_data(data)):
                 data_input_dict, util_input_dict, num_token = prepare_batch_input(
                     data_buffer, data_input_names, util_input_names,
                     ModelHyperParams.eos_idx, ModelHyperParams.eos_idx,
