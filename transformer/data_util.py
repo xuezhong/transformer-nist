@@ -93,6 +93,7 @@ class DataReader(object):
         self._min_length = min_length
         self._max_length = max_length
         self._delimiter = delimiter
+        self._epoch_batches = []
 
         src_seq_words, trg_seq_words = self._load_data(fpattern, tar_fname)
         self._src_seq_ids = [[
@@ -190,12 +191,13 @@ class DataReader(object):
         return word_dict
 
     def _sample_generator(self):
-        if self._sort_type == SortType.GLOBAL and not self._sorted:
-            self._sample_idxs.sort(
-                key=lambda idx: max(len(self._src_seq_ids[idx]),
+        if self._sort_type == SortType.GLOBAL:
+            if not self._sorted:
+                self._sample_idxs.sort(
+                    key=lambda idx: max(len(self._src_seq_ids[idx]),
                     len(self._trg_seq_ids[idx] if not self._only_src else 0))
-            )
-            self._sorted = True
+                )
+                self._sorted = True
         elif self._shuffle:
             random.shuffle(self._sample_idxs)
 
@@ -252,18 +254,21 @@ class DataReader(object):
                     or len(batch_data) == self._batch_size:
                 yield batch_data
         else:
-            epoch_batches = []
-            batch_data, last_batch = next_batch()
-            while not last_batch:
-                epoch_batches.append(batch_data)
+            # should re-generate batches
+            if self._sort_type == SortType.POOL or len(self._epoch_batches) == 0:
+                self._epoch_batches = []
                 batch_data, last_batch = next_batch()
+                while not last_batch:
+                    self._epoch_batches.append(batch_data)
+                    batch_data, last_batch = next_batch()
 
-            if (not self._clip_last_batch and len(batch_data) > 0) \
-                    or len(batch_data) == self._batch_size:
-                epoch_batches.append(batch_data)
+                if (not self._clip_last_batch and len(batch_data) > 0) \
+                        or len(batch_data) == self._batch_size:
+                    self._epoch_batches.append(batch_data)
 
-            random.shuffle(epoch_batches)
-            for batch_data in epoch_batches:
+            random.shuffle(self._epoch_batches)
+
+            for batch_data in self._epoch_batches:
                 yield batch_data
 
 if __name__ == "__main__":
