@@ -4,15 +4,13 @@ import glob
 
 import random
 
-START_MARK = "<s>"
-END_MARK = "<e>"
-UNK_MARK = "<unk>"
+START_MARK = 0
+END_MARK = 1
+UNK_MARK = 2
 
 
 class DataLoader(object):
     def __init__(self,
-                 src_vocab_fpath,
-                 trg_vocab_fpath,
                  fpattern,
                  batch_size,
                  token_batch_size=0,
@@ -20,10 +18,7 @@ class DataLoader(object):
                  sort_by_length=True,
                  shuffle=True,
                  min_len=0,
-                 max_len=100,
-                 n_batch=1):
-        self._src_vocab = self._load_dict(src_vocab_fpath)
-        self._trg_vocab = self._load_dict(trg_vocab_fpath)
+                 max_len=100):
         self._batch_size = batch_size
         self._token_batch_size = token_batch_size
         self._tar_fname = tar_fname
@@ -31,21 +26,10 @@ class DataLoader(object):
         self._shuffle = shuffle
         self._min_len = min_len
         self._max_len = max_len
-        self._n_batch = n_batch
 
         src_seq_words, trg_seq_words = self._load_data(fpattern, tar_fname)
-        self._src_seq_words = src_seq_words
-        self._trg_seq_words = trg_seq_words
-        src_seq_ids = [[
-            self._src_vocab.get(word, self._src_vocab.get(UNK_MARK))
-            for word in ([START_MARK] + src_seq + [END_MARK])
-        ] for src_seq in self._src_seq_words]
-        trg_seq_ids = [[
-            self._trg_vocab.get(word, self._trg_vocab.get(UNK_MARK))
-            for word in ([START_MARK] + trg_seq + [END_MARK])
-        ] for trg_seq in self._trg_seq_words]
-        self._src_seq_words = src_seq_ids
-        self._trg_seq_words = trg_seq_ids
+        self._src_seq_words = [[START_MARK] + src_seq + [END_MARK] for src_seq in src_seq_words]
+        self._trg_seq_words = [[START_MARK] + trg_seq + [END_MARK] for trg_seq in trg_seq_words]
 
         self._ins_cnt = len(self._src_seq_words)
         assert len(self._trg_seq_words) == self._ins_cnt
@@ -112,16 +96,6 @@ class DataLoader(object):
 
         return src_seq_words, trg_seq_words
 
-    def _load_dict(self, dict_path, reverse=False):
-        word_dict = {}
-        with open(dict_path, "r") as fdict:
-            for idx, line in enumerate(fdict):
-                if reverse:
-                    word_dict[idx] = line.strip()
-                else:
-                    word_dict[line.strip()] = idx
-        return word_dict
-
     def __iter__(self):
         return self
 
@@ -166,8 +140,6 @@ class DataLoader(object):
         if self._shuffle:
             if not self._sort_by_length and self._token_batch_size == 0:
                 random.shuffle(self._ins_idx)
-                #self._src_seq_words = self._src_seq_words[self._ins_idx]
-                #self._trg_seq_words = self._trg_seq_words[self._ins_idx]
                 self._src_seq_words = [
                     self._src_seq_words[ins_idx] for ins_idx in self._ins_idx
                 ]
@@ -200,8 +172,6 @@ class DataLoader(object):
             if self._shuffle:
                 if not self._sort_by_length and self._token_batch_size == 0:
                     random.shuffle(self._ins_idx)
-                    #self._src_seq_words = self._src_seq_words[self._ins_idx]
-                    #self._trg_seq_words = self._trg_seq_words[self._ins_idx]
                     self._src_seq_words = [
                         self._src_seq_words[ins_idx]
                         for ins_idx in self._ins_idx
@@ -213,16 +183,4 @@ class DataLoader(object):
                 else:
                     random.shuffle(self._epoch_batch_idx)
             raise StopIteration
-
-if __name__ == "__main__":
-    '''data_loader = DataLoader("/root/workspace/unify_reader/wmt16/en_10000.dict",
-                             "/root/workspace/unify_reader/wmt16/de_10000.dict",
-                             "/root/workspace/unify_reader/wmt16/wmt16.tar.gz",
-                             2, tar_fname="wmt16/train")'''
-    data_loader = DataLoader(
-        "/root/workspace/unify_reader/nist06n_tiny/cn_30001.dict.unify",
-        "/root/workspace/unify_reader/nist06n_tiny/en_30001.dict.unify",
-        "/root/workspace/unify_reader/nist06n_tiny/data/part-*",
-        2)
-    print data_loader.next()
 

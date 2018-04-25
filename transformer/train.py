@@ -163,9 +163,7 @@ def main():
     dev_count = fluid.core.get_cuda_device_count()
 
     train_data = data_util.DataLoader(
-        src_vocab_fpath="./cn_30001.dict",
-        trg_vocab_fpath="./en_30001.dict",
-        fpattern="/root/nist06/data/part-*",
+        fpattern="/root/nist06/data_id_tiny/part-*",
         batch_size=TrainTaskConfig.batch_size * dev_count,
         token_batch_size=TrainTaskConfig.token_batch_size,
         sort_by_length=TrainTaskConfig.sort_by_length,
