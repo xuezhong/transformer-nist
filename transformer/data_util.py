@@ -11,6 +11,7 @@ UNK_MARK = "<unk>"
 class SortType(object):
     GLOBAL = 'global'
     POOL = 'pool'
+    NONE = "none"
 
 class EndEpoch():
     pass
@@ -20,7 +21,7 @@ class Pool(object):
         self._pool_size = pool_size
         self._pool = []
         self._sample_generator = sample_generator()
-        self._end = True
+        self._end = False
         self._sort = sort
 
     def _fill(self):
@@ -67,7 +68,7 @@ class DataReader(object):
                  fpattern,
                  batch_size,
                  pool_size,
-                 sort_type=SortType.GLOBAL,
+                 sort_type=SortType.NONE,
                  clip_last_batch=True,
                  tar_fname=None,
                  min_length=0,
@@ -82,6 +83,7 @@ class DataReader(object):
         if trg_vocab_fpath is not None:
             self._trg_vocab = self._load_dict(trg_vocab_fpath)
             self._only_src = False
+        self._pool_size = pool_size
         self._batch_size = batch_size
         self._use_token_batch = use_token_batch
         self._sort_type = sort_type
@@ -90,13 +92,13 @@ class DataReader(object):
         self._shuffle_batch = shuffle_batch
         self._min_length = min_length
         self._max_length = max_length
+        self._delimiter = delimiter
 
         src_seq_words, trg_seq_words = self._load_data(fpattern, tar_fname)
-
         self._src_seq_ids = [[
             self._src_vocab.get(word, self._src_vocab.get(UNK_MARK))
             for word in ([START_MARK] + src_seq_words + [END_MARK])]
-            for src_seq_words in self._src_seq_words
+            for src_seq_words in src_seq_words
         ]
 
         self._sample_count = len(self._src_seq_ids)
@@ -105,7 +107,7 @@ class DataReader(object):
             self._trg_seq_ids = [[
                 self._trg_vocab.get(word, self._trg_vocab.get(UNK_MARK))
                 for word in ([START_MARK] + trg_seq + [END_MARK])]
-                for trg_seq in self._trg_seq_words
+                for trg_seq in trg_seq_words
             ]
             if len(self._trg_seq_ids) != self._sample_count:
                 raise Exception("Inconsistent sample count between "
@@ -123,8 +125,9 @@ class DataReader(object):
 
         for line in f_obj:
             fields = line.strip().split(self._delimiter)
+
             if len(fields) != 2 or (self._only_src and len(fields) != 1):
-                raise ValueError("Invalid line: %s" % line)
+                continue
 
             sample_words = []
             is_valid_sample = True
@@ -158,10 +161,10 @@ class DataReader(object):
         trg_seq_words = []
 
         if len(fpaths) == 1 and tarfile.is_tarfile(fpaths[0]):
-            if self._tar_fname is None:
+            if tar_fname is None:
                 raise Exception("If tar file provided, please set tar_fname.")
 
-            f = tarfile.open(fpath, 'r')
+            f = tarfile.open(fpaths[0], 'r')
             part_file_data = self._parse_file(f.extractfile(tar_fname))
             src_seq_words = part_file_data[0]
             trg_seq_words = part_file_data[1]
@@ -170,11 +173,21 @@ class DataReader(object):
                 if not os.path.isfile(fpath):
                     raise IOError("Invalid file: %s" % fpath)
 
-                one_file_data = self._parse_file(open(fpath, 'r'))
+                part_file_data = self._parse_file(open(fpath, 'r'))
                 src_seq_words.extend(part_file_data[0])
                 trg_seq_words.extend(part_file_data[1])
 
         return src_seq_words, trg_seq_words
+
+    def _load_dict(self, dict_path, reverse=False):
+        word_dict = {}
+        with open(dict_path, "r") as fdict:
+            for idx, line in enumerate(fdict):
+                if reverse:
+                    word_dict[idx] = line.strip()
+                else:
+                    word_dict[line.strip()] = idx
+        return word_dict
 
     def _sample_generator(self):
         if self._sort_type == SortType.GLOBAL and not self._sorted:
@@ -194,7 +207,7 @@ class DataReader(object):
                        self._trg_seq_ids[sample_idx][:-1],
                        self._trg_seq_ids[sample_idx][1:])
 
-    def _batch_generator(self):
+    def batch_generator(self):
         pool = Pool(self._sample_generator,
                     self._pool_size,
                     True if self._sort_type == SortType.POOL else False)
@@ -207,6 +220,7 @@ class DataReader(object):
 
                 if sample is None:
                     pool.push_back(batch_data)
+                    batch_data = []
                     continue
 
                 if isinstance(sample, EndEpoch):
@@ -214,49 +228,58 @@ class DataReader(object):
 
                 if self._use_token_batch:
                     max_len = max(max_len, len(sample[0]))
+
                     if not self._only_src:
                         max_len = max(max_len, len(sample[1]))
 
-                    if max_len * (len(batch_data) + 1) > self._batch_size:
-                        return batch_data, False
-                    else:
+                    if max_len * (len(batch_data) + 1) < self._batch_size:
                         batch_data.append(pool.next())
+                    else:
+                        return batch_data, False
                 else:
-                    if len(batch_data) > self._batch_size:
-                        return batch_data, False
-                    else:
+                    if len(batch_data) < self._batch_size:
                         batch_data.append(pool.next())
+                    else:
+                        return batch_data, False
 
         if not self._shuffle_batch:
-            while True:
+            batch_data, last_batch = next_batch()
+            while not last_batch:
+                yield batch_data
                 batch_data, last_batch = next_batch()
-                if self._use_token_batch or len(batch_data) < self._batch_size:
-                    break
 
-                yield zip(batch_data)
+            if (not self._clip_last_batch and len(batch_data) > 0) \
+                    or len(batch_data) == self._batch_size:
+                yield batch_data
         else:
             epoch_batches = []
-            while True:
+            batch_data, last_batch = next_batch()
+            while not last_batch:
+                epoch_batches.append(batch_data)
                 batch_data, last_batch = next_batch()
-                if self._use_token_batch or len(batch_data) < self._batch_size:
-                    break
 
+            if (not self._clip_last_batch and len(batch_data) > 0) \
+                    or len(batch_data) == self._batch_size:
                 epoch_batches.append(batch_data)
 
             random.shuffle(epoch_batches)
-
             for batch_data in epoch_batches:
-                yield zip(batch_data)
+                yield batch_data
 
 if __name__ == "__main__":
     '''data_loader = DataLoader("/root/workspace/unify_reader/wmt16/en_10000.dict",
                              "/root/workspace/unify_reader/wmt16/de_10000.dict",
                              "/root/workspace/unify_reader/wmt16/wmt16.tar.gz",
                              2, tar_fname="wmt16/train")'''
-    data_loader = DataLoader(
+
+    data_loader = DataReader(
         "/root/workspace/unify_reader/nist06n_tiny/cn_30001.dict.unify",
         "/root/workspace/unify_reader/nist06n_tiny/en_30001.dict.unify",
         "/root/workspace/unify_reader/nist06n_tiny/data/part-*",
-        2)
-    print data_loader.next()
-
+        30,
+        100000,
+        sort_type=SortType.GLOBAL,
+        use_token_batch=True)
+    for batch_data in data_loader.batch_generator():
+        print batch_data
+        break
