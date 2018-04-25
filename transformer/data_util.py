@@ -8,211 +8,245 @@ START_MARK = "<s>"
 END_MARK = "<e>"
 UNK_MARK = "<unk>"
 
+class SortType(object):
+    GLOBAL = 'global'
+    POOL = 'pool'
 
-class DataLoader(object):
+class EndEpoch():
+    pass
+
+class Pool(object):
+    def __init__(self, sample_generator, pool_size, sort):
+        self._pool_size = pool_size
+        self._pool = []
+        self._sample_generator = sample_generator()
+        self._end = True
+        self._sort = sort
+
+    def _fill(self):
+        while len(self._pool) < self._pool_size and not self._end:
+            try:
+                sample = self._sample_generator.next()
+                self._pool.append(sample)
+            except StopIteration as e:
+                self._end = True
+                break
+
+        if self._sort:
+            self._pool.sort(
+                    key=lambda sample: max(len(sample[0]), len(sample[1]))
+                    if len(sample) > 1 else len(sample[0])
+            )
+
+        if self._end and len(self._pool) < self._pool_size:
+            self._pool.append(EndEpoch())
+
+    def push_back(self, samples):
+        if len(self._pool) != 0:
+            raise Exception("Pool should be empty.")
+
+        if len(samples) > self._pool_size:
+            raise Exception("Push back too many samples.")
+
+        for sample in samples:
+            self._pool.append(sample)
+
+        self._fill()
+
+    def next(self, look=False):
+        if len(self._pool) == 0:
+            return None
+        else:
+            return self._pool[0] if look else self._pool.pop(0)
+
+
+class DataReader(object):
     def __init__(self,
                  src_vocab_fpath,
                  trg_vocab_fpath,
                  fpattern,
                  batch_size,
-                 token_batch_size=0,
+                 pool_size,
+                 sort_type=SortType.GLOBAL,
+                 clip_last_batch=True,
                  tar_fname=None,
-                 sort_by_length=True,
+                 min_length=0,
+                 max_length=100,
                  shuffle=True,
-                 min_len=0,
-                 max_len=100,
-                 n_batch=1):
+                 shuffle_batch=False,
+                 use_token_batch=False,
+                 delimiter='\t',
+                 seed=0):
         self._src_vocab = self._load_dict(src_vocab_fpath)
-        self._trg_vocab = self._load_dict(trg_vocab_fpath)
+        self._only_src = True
+        if trg_vocab_fpath is not None:
+            self._trg_vocab = self._load_dict(trg_vocab_fpath)
+            self._only_src = False
         self._batch_size = batch_size
-        self._token_batch_size = token_batch_size
-        self._tar_fname = tar_fname
-        self._sort_by_length = sort_by_length
+        self._use_token_batch = use_token_batch
+        self._sort_type = sort_type
+        self._clip_last_batch = clip_last_batch
         self._shuffle = shuffle
-        self._min_len = min_len
-        self._max_len = max_len
-        self._n_batch = n_batch
+        self._shuffle_batch = shuffle_batch
+        self._min_length = min_length
+        self._max_length = max_length
 
         src_seq_words, trg_seq_words = self._load_data(fpattern, tar_fname)
-        self._src_seq_words = src_seq_words
-        self._trg_seq_words = trg_seq_words
-        src_seq_ids = [[
+
+        self._src_seq_ids = [[
             self._src_vocab.get(word, self._src_vocab.get(UNK_MARK))
-            for word in ([START_MARK] + src_seq + [END_MARK])
-        ] for src_seq in self._src_seq_words]
-        trg_seq_ids = [[
-            self._trg_vocab.get(word, self._trg_vocab.get(UNK_MARK))
-            for word in ([START_MARK] + trg_seq + [END_MARK])
-        ] for trg_seq in self._trg_seq_words]
-        self._src_seq_words = src_seq_ids
-        self._trg_seq_words = trg_seq_ids
+            for word in ([START_MARK] + src_seq_words + [END_MARK])]
+            for src_seq_words in self._src_seq_words
+        ]
 
-        self._ins_cnt = len(self._src_seq_words)
-        assert len(self._trg_seq_words) == self._ins_cnt
+        self._sample_count = len(self._src_seq_ids)
 
-        self._ins_idx = [i for i in xrange(self._ins_cnt)]
+        if not self._only_src:
+            self._trg_seq_ids = [[
+                self._trg_vocab.get(word, self._trg_vocab.get(UNK_MARK))
+                for word in ([START_MARK] + trg_seq + [END_MARK])]
+                for trg_seq in self._trg_seq_words
+            ]
+            if len(self._trg_seq_ids) != self._sample_count:
+                raise Exception("Inconsistent sample count between "
+                                "source sequences and target sequences.")
+        else: self._trg_seq_ids = None
 
-        if sort_by_length:
-            self._sort_index_by_len()
+        self._sample_idxs = [i for i in xrange(self._sample_count)]
+        self._sorted = False
 
-        # fix the batch
-        self._compose_batch_idx()
-
-        self._epoch_idx = 0
-        self._cur_batch_idx = 0
+        random.seed(seed)
 
     def _parse_file(self, f_obj):
         src_seq_words = []
         trg_seq_words = []
+
         for line in f_obj:
-            fields = line.strip().split('\t')
-            is_valid = True
-            line_words = []
+            fields = line.strip().split(self._delimiter)
+            if len(fields) != 2 or (self._only_src and len(fields) != 1):
+                raise ValueError("Invalid line: %s" % line)
 
-            for i, field in enumerate(fields):
-                words = field.split()
-                if len(words) == 0 or \
-                   len(words) < self._min_len or \
-                   len(words) > self._max_len:
-                    is_valid = False
+            sample_words = []
+            is_valid_sample = True
+            max_len = -1
+
+            for i, seq in enumerate(fields):
+                seq_words = seq.split()
+                max_len = max(max_len, len(seq_words))
+                if len(seq_words) == 0 or \
+                        len(seq_words) < self._min_length or \
+                        len(seq_words) > self._max_length or \
+                        (self._use_token_batch and max_len > self._batch_size):
+                    is_valid_sample = False
                     break
-                line_words.append(words)
 
-            if not is_valid: continue
+                sample_words.append(seq_words)
 
-            assert len(line_words) == 2
+            if not is_valid_sample: continue
 
-            src_seq_words.append(line_words[0])
-            trg_seq_words.append(line_words[1])
+            src_seq_words.append(sample_words[0])
+
+            if not self._only_src:
+                trg_seq_words.append(sample_words[1])
 
         return (src_seq_words, trg_seq_words)
 
-    def _load_data(self, fpattern, tar_fname=None):
+    def _load_data(self, fpattern, tar_fname):
         fpaths = glob.glob(fpattern)
+
         src_seq_words = []
         trg_seq_words = []
 
-        for fpath in fpaths:
-            if tarfile.is_tarfile(fpath):
-                assert tar_fname is not None
-                f = tarfile.open(fpath, 'r')
-                one_file_data = self._parse_file(f.extractfile(tar_fname))
-            else:
-                assert os.path.isfile(fpath)
+        if len(fpaths) == 1 and tarfile.is_tarfile(fpaths[0]):
+            if self._tar_fname is None:
+                raise Exception("If tar file provided, please set tar_fname.")
+
+            f = tarfile.open(fpath, 'r')
+            part_file_data = self._parse_file(f.extractfile(tar_fname))
+            src_seq_words = part_file_data[0]
+            trg_seq_words = part_file_data[1]
+        else:
+            for fpath in fpaths:
+                if not os.path.isfile(fpath):
+                    raise IOError("Invalid file: %s" % fpath)
+
                 one_file_data = self._parse_file(open(fpath, 'r'))
-
-            part_src_words, part_trg_words = one_file_data
-
-            if len(src_seq_words) == 0:
-                src_seq_words, trg_seq_words = part_src_words, part_trg_words
-                continue
-
-            src_seq_words.extend(part_src_words)
-            trg_seq_words.extend(part_trg_words)
+                src_seq_words.extend(part_file_data[0])
+                trg_seq_words.extend(part_file_data[1])
 
         return src_seq_words, trg_seq_words
 
-    def _load_dict(self, dict_path, reverse=False):
-        word_dict = {}
-        with open(dict_path, "r") as fdict:
-            for idx, line in enumerate(fdict):
-                if reverse:
-                    word_dict[idx] = line.strip()
-                else:
-                    word_dict[line.strip()] = idx
-        return word_dict
+    def _sample_generator(self):
+        if self._sort_type == SortType.GLOBAL and not self._sorted:
+            self._sample_idxs.sort(
+                key=lambda idx: max(len(self._src_seq_ids[idx]),
+                    len(self._trg_seq_ids[idx] if not self._only_src else 0))
+            )
+            self._sorted = True
+        elif self._shuffle:
+            random.shuffle(self._sample_idxs)
 
-    def __iter__(self):
-        return self
-
-    def __len__(self):
-        return sum([1 for _ in self])
-
-    def __next__(self):
-        return self.next()
-
-    def _compose_batch_idx(self):
-        self._epoch_batch_idx = []
-
-        idx = 0
-
-        if self._token_batch_size > 0:
-            batch_idx = []
-            max_src_len = 0
-            max_trg_len = 0
-            while idx < self._ins_cnt:
-                max_src_len = max(len(self._src_seq_words[self._ins_idx[idx]]),
-                                  max_src_len)
-                max_trg_len = max(len(self._trg_seq_words[self._ins_idx[idx]]),
-                                  max_trg_len)
-                max_len = max(max_src_len, max_trg_len)
-                if max_len * (len(batch_idx) + 1) > self._token_batch_size:
-                    self._epoch_batch_idx.append(batch_idx)
-                    max_src_len = 0
-                    max_trg_len = 0
-                    batch_idx = []
-                    continue
-                batch_idx.append(self._ins_idx[idx])
-                idx += 1
-            if len(batch_idx) > 0:
-                self._epoch_batch_idx.append(batch_idx)
-        else:
-            while idx < self._ins_cnt:
-                batch_idx = self._ins_idx[idx:idx + self._batch_size]
-                if len(batch_idx) > 0:
-                    self._epoch_batch_idx.append(batch_idx)
-                idx += len(batch_idx)
-
-        if self._shuffle:
-            if not self._sort_by_length and self._token_batch_size == 0:
-                random.shuffle(self._ins_idx)
-                #self._src_seq_words = self._src_seq_words[self._ins_idx]
-                #self._trg_seq_words = self._trg_seq_words[self._ins_idx]
-                self._src_seq_words = [
-                    self._src_seq_words[ins_idx] for ins_idx in self._ins_idx
-                ]
-                self._trg_seq_words = [
-                    self._trg_seq_words[ins_idx] for ins_idx in self._ins_idx
-                ]
+        for sample_idx in self._sample_idxs:
+            if self._only_src:
+                yield (self._src_seq_ids[sample_idx])
             else:
-                random.shuffle(self._epoch_batch_idx)
+                yield (self._src_seq_ids[sample_idx],
+                       self._trg_seq_ids[sample_idx][:-1],
+                       self._trg_seq_ids[sample_idx][1:])
 
-    def _sort_index_by_len(self):
-        self._ins_idx.sort(
-                key=lambda idx: max(
-                    len(self._src_seq_words[idx]),
-                    len(self._trg_seq_words[idx])))
+    def _batch_generator(self):
+        pool = Pool(self._sample_generator,
+                    self._pool_size,
+                    True if self._sort_type == SortType.POOL else False)
 
-    def next(self):
-        while self._cur_batch_idx < len(self._epoch_batch_idx):
-            batch_idx = self._epoch_batch_idx[self._cur_batch_idx]
-            src_seq_words = [self._src_seq_words[idx] for idx in batch_idx]
-            trg_seq_words = [self._trg_seq_words[idx] for idx in batch_idx]
-            # consider whether drop
-            self._cur_batch_idx += 1
-            return zip(src_seq_words,
-                       [trg_seq[:-1] for trg_seq in trg_seq_words],
-                       [trg_seq[1:] for trg_seq in trg_seq_words])
+        def next_batch():
+            batch_data = []
+            max_len = -1
+            while True:
+                sample = pool.next(look=True)
 
-        if self._cur_batch_idx >= len(self._epoch_batch_idx):
-            self._epoch_idx += 1
-            self._cur_batch_idx = 0
-            if self._shuffle:
-                if not self._sort_by_length and self._token_batch_size == 0:
-                    random.shuffle(self._ins_idx)
-                    #self._src_seq_words = self._src_seq_words[self._ins_idx]
-                    #self._trg_seq_words = self._trg_seq_words[self._ins_idx]
-                    self._src_seq_words = [
-                        self._src_seq_words[ins_idx]
-                        for ins_idx in self._ins_idx
-                    ]
-                    self._trg_seq_words = [
-                        self._trg_seq_words[ins_idx]
-                        for ins_idx in self._ins_idx
-                    ]
+                if sample is None:
+                    pool.push_back(batch_data)
+                    continue
+
+                if isinstance(sample, EndEpoch):
+                    return batch_data, True
+
+                if self._use_token_batch:
+                    max_len = max(max_len, len(sample[0]))
+                    if not self._only_src:
+                        max_len = max(max_len, len(sample[1]))
+
+                    if max_len * (len(batch_data) + 1) > self._batch_size:
+                        return batch_data, False
+                    else:
+                        batch_data.append(pool.next())
                 else:
-                    random.shuffle(self._epoch_batch_idx)
-            raise StopIteration
+                    if len(batch_data) > self._batch_size:
+                        return batch_data, False
+                    else:
+                        batch_data.append(pool.next())
+
+        if not self._shuffle_batch:
+            while True:
+                batch_data, last_batch = next_batch()
+                if self._use_token_batch or len(batch_data) < self._batch_size:
+                    break
+
+                yield zip(batch_data)
+        else:
+            epoch_batches = []
+            while True:
+                batch_data, last_batch = next_batch()
+                if self._use_token_batch or len(batch_data) < self._batch_size:
+                    break
+
+                epoch_batches.append(batch_data)
+
+            random.shuffle(epoch_batches)
+
+            for batch_data in epoch_batches:
+                yield zip(batch_data)
 
 if __name__ == "__main__":
     '''data_loader = DataLoader("/root/workspace/unify_reader/wmt16/en_10000.dict",
