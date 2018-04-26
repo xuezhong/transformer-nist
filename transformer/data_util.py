@@ -217,6 +217,8 @@ class DataReader(object):
         def next_batch():
             batch_data = []
             max_len = -1
+            batch_max_seq_len = -1
+
             while True:
                 sample = pool.next(look=True)
 
@@ -226,44 +228,55 @@ class DataReader(object):
                     continue
 
                 if isinstance(sample, EndEpoch):
-                    return batch_data, True
+                    return batch_data, batch_max_seq_len, True
+
+                max_len = max(max_len, len(sample[0]))
+
+                if not self._only_src:
+                    max_len = max(max_len, len(sample[1]))
 
                 if self._use_token_batch:
-                    max_len = max(max_len, len(sample[0]))
-
-                    if not self._only_src:
-                        max_len = max(max_len, len(sample[1]))
-
                     if max_len * (len(batch_data) + 1) < self._batch_size:
+                        batch_max_seq_len = max_len
                         batch_data.append(pool.next())
                     else:
-                        return batch_data, False
+                        return batch_data, batch_max_seq_len, False
                 else:
                     if len(batch_data) < self._batch_size:
+                        batch_max_seq_len = max_len
                         batch_data.append(pool.next())
                     else:
-                        return batch_data, False
+                        return batch_data, batch_max_seq_len, False
 
         if not self._shuffle_batch:
-            batch_data, last_batch = next_batch()
+            batch_data, batch_max_seq_len, last_batch = next_batch()
             while not last_batch:
                 yield batch_data
-                batch_data, last_batch = next_batch()
+                batch_data, batch_max_seq_len, last_batch = next_batch()
+
+            batch_size = len(batch_data)
+            if self._use_token_batch:
+                batch_size *= batch_max_seq_len
 
             if (not self._clip_last_batch and len(batch_data) > 0) \
-                    or len(batch_data) == self._batch_size:
+                    or (batch_size == self._batch_size):
                 yield batch_data
         else:
             # should re-generate batches
-            if self._sort_type == SortType.POOL or len(self._epoch_batches) == 0:
+            if self._sort_type == SortType.POOL \
+                    or len(self._epoch_batches) == 0:
                 self._epoch_batches = []
-                batch_data, last_batch = next_batch()
+                batch_data, batch_max_seq_len, last_batch = next_batch()
                 while not last_batch:
                     self._epoch_batches.append(batch_data)
-                    batch_data, last_batch = next_batch()
+                    batch_data, batch_max_seq_len, last_batch = next_batch()
+
+                batch_size = len(batch_data)
+                if self._use_token_batch:
+                    batch_size *= batch_max_seq_len
 
                 if (not self._clip_last_batch and len(batch_data) > 0) \
-                        or len(batch_data) == self._batch_size:
+                        or (batch_size == self._batch_size):
                     self._epoch_batches.append(batch_data)
 
             random.shuffle(self._epoch_batches)
