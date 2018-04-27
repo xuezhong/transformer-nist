@@ -4,10 +4,15 @@ import glob
 
 import random
 
+'''
 START_MARK = "<s>"
 END_MARK = "<e>"
 UNK_MARK = "<unk>"
+'''
 
+START_MARK = "_GO"
+END_MARK = "_EOS"
+UNK_MARK = "_UNK"
 
 class DataLoader(object):
     def __init__(self,
