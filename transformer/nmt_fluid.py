@@ -272,12 +272,18 @@ def main():
 
         init = False
         for pass_id in xrange(TrainTaskConfig.pass_num):
+            ts = time.time()
+            pass_total = 0
             pass_start_time = time.time()
             for batch_id, data in enumerate(train_data()):
+                batch_total=0
+                start_time = time.time()
                 feed_list = []
                 total_num_token = 0
                 #lr_rate = lr_scheduler.update_learning_rate()
                 for place_id, data_buffer in enumerate(split_data(data)):
+                    batch_total += len(data_buffer)
+                    pass_total += len(data_buffer)
                     data_input_dict, util_input_dict, num_token = prepare_batch_input(
                         data_buffer, data_input_names, util_input_names,
                         ModelHyperParams.eos_idx, ModelHyperParams.eos_idx,
@@ -305,22 +311,46 @@ def main():
                 )  # sum the cost from multi devices
                 total_token_num = token_num_val.sum()
                 total_avg_cost = total_sum_cost / total_token_num
+                '''
                 print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f" %
                       (pass_id, batch_id, total_sum_cost, total_avg_cost,
                        np.exp([min(total_avg_cost, 100)])))
+                '''
+                print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f, speed: %.2f" %
+                      (pass_id, batch_id, total_sum_cost, total_avg_cost, 
+                       np.exp([min(total_avg_cost, 100)]),
+                       batch_total / (time.time() - start_time)))
+
                 init = True
+
+                if args.test_save:
+                    if batch_id == args.exit_batch_id:
+                        print("batch_id: %d exit!" % batch_id)
+                        break
+
             pass_end_time = time.time()
             time_consumed = pass_end_time - pass_start_time
+            '''
             print("pass_id = " + str(pass_id) + " time_consumed = " + str(
                 time_consumed))
+            '''
+            print("pass_id = %s time_consumed = %s speed: %.2f" % \
+                  (str(pass_id), str(time_consumed), pass_total / (time.time() - ts)))
+
+            '''
             fluid.io.save_persistables(exe,
                 os.path.join(TrainTaskConfig.ckpt_dir,
                              "pass_" + str(pass_id) + ".checkpoint"))
+            '''
+
             fluid.io.save_inference_model(
-                os.path.join(TrainTaskConfig.model_dir,
-                             "pass_" + str(pass_id) + ".infer.model"),
+                os.path.join(args.model_path,
+                             "pass_" + str(pass_id) + "_" + str(args.task_index) + ".infer.model"),
                 data_input_names[:-2] + util_input_names,
                 [predict], exe)
+
+            if args.test_save:
+                break
 
     if args.local:
         '''
@@ -342,7 +372,7 @@ def main():
             src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
             trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
             fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
-            batch_size=TrainTaskConfig.batch_size * dev_count,
+            batch_size=args.batch_size * dev_count,
             token_batch_size=TrainTaskConfig.token_batch_size,
             sort_by_length=TrainTaskConfig.sort_by_length,
             shuffle=True)
@@ -404,7 +434,7 @@ def main():
                     src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
                     trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
                     fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
-                    batch_size=TrainTaskConfig.batch_size * dev_count,
+                    batch_size=args.batch_size * dev_count,
                     token_batch_size=TrainTaskConfig.token_batch_size,
                     sort_by_length=TrainTaskConfig.sort_by_length,
                     shuffle=True)
