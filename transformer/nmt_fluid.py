@@ -10,8 +10,7 @@ import paddle.fluid.core as core
 from model import transformer, position_encoding_init
 import model
 from optim import LearningRateScheduler
-from config import TrainTaskConfig, ModelHyperParams, pos_enc_param_names, \
-        encoder_input_data_names, decoder_input_data_names, label_data_names
+from config import *
 import paddle.fluid.debuger as debuger
 import nist_data_provider
 import sys
@@ -213,7 +212,8 @@ def main():
         ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
         ModelHyperParams.n_head, ModelHyperParams.d_key,
         ModelHyperParams.d_value, ModelHyperParams.d_model,
-        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout)
+        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
+        TrainTaskConfig.label_smooth_eps)
 
     '''
     lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
@@ -275,6 +275,9 @@ def main():
                                        ModelHyperParams.d_model), place)
     '''
 
+    data_input_names = encoder_data_input_fields + \
+        decoder_data_input_fields[: -1] + label_data_input_fields
+    util_input_names = encoder_util_input_fields + decoder_util_input_fields
     def train_loop(exe, trainer_prog):
         for pass_id in xrange(args.pass_num):
             ts = time.time()
@@ -288,15 +291,26 @@ def main():
 
                 total += len(data)
                 start_time = time.time()
+                '''
                 data_input = prepare_batch_input(
                     data, encoder_input_data_names + decoder_input_data_names[:-1] +
                     label_data_names, ModelHyperParams.eos_idx,
                     ModelHyperParams.eos_idx, ModelHyperParams.n_head,
                     ModelHyperParams.d_model)
                 '''
+
+                data_input_dict, util_input_dict, num_token = prepare_batch_input(
+                    data, data_input_names, util_input_names,
+                    ModelHyperParams.eos_idx, ModelHyperParams.eos_idx,
+                    ModelHyperParams.n_head, ModelHyperParams.d_model)
+
+                data_input = dict(data_input_dict.items() + util_input_dict.items())
+
+                '''
                 if args.local:
                     lr_scheduler.update_learning_rate(data_input)
                 '''
+
                 outs = exe.run(trainer_prog,
                                feed=data_input,
                                fetch_list=[sum_cost, avg_cost],
@@ -343,12 +357,23 @@ def main():
                 position_encoding_init(ModelHyperParams.max_length + 1,
                                        ModelHyperParams.d_model), place)
 
+        '''
         train_reader = paddle.batch(
             paddle.reader.shuffle(
                 nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
                                          ModelHyperParams.trg_vocab_size),
                 buf_size=100000),
             batch_size=args.batch_size)
+        '''
+        train_reader = data_util.DataLoader(
+                src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
+                trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
+                fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
+                batch_size=args.batch_size,
+                token_batch_size=TrainTaskConfig.token_batch_size,
+                sort_by_length=TrainTaskConfig.sort_by_length,
+                shuffle=True)
+
 
         '''
         test_reader = paddle.batch(
