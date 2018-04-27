@@ -255,7 +255,7 @@ def main():
         beta1=TrainTaskConfig.beta1,
         beta2=TrainTaskConfig.beta2,
         epsilon=TrainTaskConfig.eps)
-    optimizer.minimize(sum_cost)
+    optimize_ops, params_grads = optimizer.minimize(sum_cost)
     
     data_input_names = encoder_data_input_fields + decoder_data_input_fields[:
                                                                              -1] + label_data_input_fields
@@ -268,7 +268,7 @@ def main():
             data = data[0]
             inst_num_per_part = len(data) // num_part
             return [data[inst_num_per_part * i : inst_num_per_part * (i + 1)] for i in range(num_part)]
-        train_data = read_multiple(reader=train_data, count=dev_count if TrainTaskConfig.token_batch_size else 1)
+        train_data = read_multiple(reader=train_reader, count=dev_count if TrainTaskConfig.token_batch_size else 1)
 
         init = False
         for pass_id in xrange(TrainTaskConfig.pass_num):
@@ -276,7 +276,7 @@ def main():
             for batch_id, data in enumerate(train_data()):
                 feed_list = []
                 total_num_token = 0
-                lr_rate = lr_scheduler.update_learning_rate()
+                #lr_rate = lr_scheduler.update_learning_rate()
                 for place_id, data_buffer in enumerate(split_data(data)):
                     data_input_dict, util_input_dict, num_token = prepare_batch_input(
                         data_buffer, data_input_names, util_input_names,
@@ -284,8 +284,8 @@ def main():
                         ModelHyperParams.n_head, ModelHyperParams.d_model)
                     total_num_token += num_token
                     feed_list.append(
-                        dict(data_input_dict.items() + util_input_dict.items() +
-                             {lr_scheduler.learning_rate.name: lr_rate}.items()))
+                        dict(data_input_dict.items() + util_input_dict.items()))
+                             #{lr_scheduler.learning_rate.name: lr_rate}.items()))
 
                     if not init:
                         for pos_enc_param_name in pos_enc_param_names:
@@ -330,6 +330,9 @@ def main():
             lr_scheduler.current_steps = TrainTaskConfig.start_step
         else:
         '''
+        dev_count = fluid.core.get_cuda_device_count()
+        print "device_count:", dev_count
+
         exe.run(fluid.framework.default_startup_program())
 
         train_exe = fluid.ParallelExecutor(
@@ -338,13 +341,12 @@ def main():
         train_reader = data_util.DataLoader(
             src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
             trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
-            fpattern="/root/nist06/data/part-*",
+            fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
             batch_size=TrainTaskConfig.batch_size * dev_count,
             token_batch_size=TrainTaskConfig.token_batch_size,
             sort_by_length=TrainTaskConfig.sort_by_length,
             shuffle=True)
 
-        dev_count = fluid.core.get_cuda_device_count()
 
         train_exe = fluid.ParallelExecutor(
             use_cuda=TrainTaskConfig.use_gpu, loss_name=sum_cost.name, customize_loss_grad=True)
@@ -395,10 +397,13 @@ def main():
             # Parameter initialization
             exe.run(fluid.default_startup_program())
 
+            dev_count = fluid.core.get_cuda_device_count()
+            print "device_count:", dev_count
+
             train_reader = data_util.DataLoader(
                     src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
                     trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
-                    fpattern="/root/nist06/data/part-*",
+                    fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
                     batch_size=TrainTaskConfig.batch_size * dev_count,
                     token_batch_size=TrainTaskConfig.token_batch_size,
                     sort_by_length=TrainTaskConfig.sort_by_length,
@@ -407,7 +412,6 @@ def main():
             train_exe = fluid.ParallelExecutor(
                 use_cuda=TrainTaskConfig.use_gpu, loss_name=sum_cost.name, customize_loss_grad=True)
 
-            dev_count = fluid.core.get_cuda_device_count()
             trainer_prog = t.get_trainer_program()
 
             train_loop(exe, train_exe, trainer_prog, dev_count)
