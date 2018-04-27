@@ -16,7 +16,7 @@ class TrainTaskConfig(object):
     # the parameters for learning rate scheduling.
     warmup_steps = 15000
     # the flag indicating to use average loss or sum loss when training.
-    use_avg_cost = True
+    use_avg_cost = False
     # the weight used to mix up the ground-truth distribution and the fixed
     # uniform distribution in label smoothing when training.
     # Set this as zero if label smoothing is not wanted.

@@ -377,10 +377,6 @@ def main():
             sort_by_length=TrainTaskConfig.sort_by_length,
             shuffle=True)
 
-
-        train_exe = fluid.ParallelExecutor(
-            use_cuda=TrainTaskConfig.use_gpu, loss_name=sum_cost.name, customize_loss_grad=True)
-
         train_loop(exe, train_exe, fluid.default_main_program(), dev_count)
     else:
         trainers = int(os.getenv("TRAINERS"))  # total trainer count
