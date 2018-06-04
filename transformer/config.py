@@ -21,6 +21,10 @@ class TrainTaskConfig(object):
     # the directory for saving trained models.
     model_dir = "trained_models"
 
+    #set default 
+    token_batch_size = 0
+    sort_by_length = False
+
 
 class InferTaskConfig(object):
     use_gpu = True

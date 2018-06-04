@@ -84,7 +84,7 @@ parser.add_argument(
 parser.add_argument(
     "--model_path",
     type=str,
-    default="/pfs/dlnel/home/work-beijing-163-com/nmt",
+    default="./model/",
     help="model path")
 
 # Flags for defining the tf.train.Server
@@ -213,13 +213,9 @@ def main():
         ModelHyperParams.max_length + 1, ModelHyperParams.n_layer,
         ModelHyperParams.n_head, ModelHyperParams.d_key,
         ModelHyperParams.d_value, ModelHyperParams.d_model,
-        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout)
-
-    '''
-    lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
-                                         TrainTaskConfig.warmup_steps, place,
-                                         TrainTaskConfig.learning_rate)
-    '''
+        ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,  
+        ModelHyperParams.src_pad_idx,  ModelHyperParams.trg_pad_idx,
+        ModelHyperParams.pos_pad_idx)
 
     warmup_steps = get_var("warmup_steps", value=TrainTaskConfig.warmup_steps)
     d_model = get_var("d_model", value=ModelHyperParams.d_model)
@@ -261,20 +257,6 @@ def main():
         test_ppl = np.exp([min(test_avg_cost, 100)])
         return test_avg_cost, test_ppl
 
-    '''
-    def train_loop(exe, trainer_prog):
-        # Initialize the parameters.
-        """
-        exe.run(fluid.framework.default_startup_program())
-        """
-        for pos_enc_param_name in pos_enc_param_names:
-            pos_enc_param = fluid.global_scope().find_var(
-                pos_enc_param_name).get_tensor()
-            pos_enc_param.set(
-                position_encoding_init(ModelHyperParams.max_length + 1,
-                                       ModelHyperParams.d_model), place)
-    '''
-
     def train_loop(exe, trainer_prog):
         for pass_id in xrange(args.pass_num):
             ts = time.time()
@@ -293,10 +275,6 @@ def main():
                     label_data_names, ModelHyperParams.eos_idx,
                     ModelHyperParams.eos_idx, ModelHyperParams.n_head,
                     ModelHyperParams.d_model)
-                '''
-                if args.local:
-                    lr_scheduler.update_learning_rate(data_input)
-                '''
                 outs = exe.run(trainer_prog,
                                feed=data_input,
                                fetch_list=[sum_cost, avg_cost],
@@ -343,19 +321,14 @@ def main():
                 position_encoding_init(ModelHyperParams.max_length + 1,
                                        ModelHyperParams.d_model), place)
 
-        train_reader = paddle.batch(
-            paddle.reader.shuffle(
-                nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                         ModelHyperParams.trg_vocab_size),
-                buf_size=100000),
-            batch_size=args.batch_size)
-
-        '''
-        test_reader = paddle.batch(
-                nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                         ModelHyperParams.trg_vocab_size),
-            batch_size=TrainTaskConfig.batch_size)
-        '''
+        train_reader = data_util.DataLoader(
+	src_vocab_fpath="./nist06n/cn_30001.dict",
+	trg_vocab_fpath="./nist06n/en_30001.dict",
+	fpattern="./nist06n/data-%d/part-*" % (args.task_index),
+	batch_size=args.batch_size,
+	token_batch_size=TrainTaskConfig.token_batch_size,
+	sort_by_length=TrainTaskConfig.sort_by_length,
+	shuffle=True)
 
         train_loop(exe, fluid.default_main_program())
     else:
@@ -368,8 +341,6 @@ def main():
 
         t = fluid.DistributeTranspiler()
         t.transpile(
-            optimize_ops,
-            params_grads,
             trainer_id=args.task_index,
             pservers=args.ps_hosts,
             trainers=trainers)
@@ -399,8 +370,8 @@ def main():
                     block_no+=1
 
             print "begin run"
-            exe.run(pserver_startup, save_program_to_file="./pserver_startup.desc")
-            exe.run(pserver_prog, save_program_to_file="./pserver_loop.desc")
+            exe.run(pserver_startup)
+            exe.run(pserver_prog)
         elif training_role == "TRAINER":
             # Parameter initialization
             exe.run(fluid.default_startup_program())
@@ -418,27 +389,13 @@ def main():
 
             #print "/root/data/nist06n/data-%d/part-*" % (args.task_index),
             train_reader = data_util.DataLoader(
-                src_vocab_fpath="/root/data/nist06n/cn_30001.dict",
-                trg_vocab_fpath="/root/data/nist06n/en_30001.dict",
-                fpattern="/root/data/nist06n/data-%d/part-*" % (args.task_index),
+                src_vocab_fpath="./nist06n/cn_30001.dict",
+                trg_vocab_fpath="./nist06n/en_30001.dict",
+                fpattern="./nist06n/data-%d/part-*" % (args.task_index),
                 batch_size=args.batch_size,
                 token_batch_size=TrainTaskConfig.token_batch_size,
                 sort_by_length=TrainTaskConfig.sort_by_length,
                 shuffle=True)
-
-            '''
-            train_reader = paddle.batch(
-                paddle.reader.shuffle(
-                    nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                             ModelHyperParams.trg_vocab_size),
-                    buf_size=100000),
-                batch_size=args.batch_size)
-
-            test_reader = paddle.batch(
-                    nist_data_provider.train("data", ModelHyperParams.src_vocab_size,
-                                             ModelHyperParams.trg_vocab_size),
-                batch_size=TrainTaskConfig.batch_size)
-            '''
 
             trainer_prog = t.get_trainer_program()
             train_loop(exe, trainer_prog)
