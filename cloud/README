@@ -1,0 +1,16 @@
+run1.sh
+多机机 fit a line
+
+run2.sh
+单机  nmt
+
+run3.sh
+多机 nmt
+
+
+run4.sh
+单机  transformer
+
+run4.sh
+多机  transformer
+
