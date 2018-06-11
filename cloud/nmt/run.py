@@ -3,7 +3,7 @@
 """
 import sys
 import time
-sys.path.append(r'thirdparty/model/transformer_nist/')
+sys.path.append(r'thirdparty/model/transformer/')
 import nmt_fluid
 
 if __name__ == '__main__':
