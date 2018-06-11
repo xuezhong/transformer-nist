@@ -3,7 +3,6 @@ import time
 import argparse
 import numpy as np
 
-import paddle
 import paddle.fluid as fluid
 import paddle.fluid.core as core
 
@@ -204,8 +203,19 @@ def get_var(name,value):
 
 #@profile
 def main():
-    place = core.CPUPlace() if args.device == 'CPU' else core.CUDAPlace(
-        args.device_id)
+    """
+    model train
+    """
+    is_local = os.getenv("PADDLE_IS_LOCAL", "0")
+    if is_local == '0':
+        args.local = False
+    else:
+        args.local = True
+    # init
+    place = fluid.CUDAPlace(0) if args.device == 'GPU' else fluid.CPUPlace()
+    training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+    if training_role == "PSERVER":
+        place = fluid.CPUPlace()
     exe = fluid.Executor(place)
 
     sum_cost, avg_cost, predict, token_num = transformer(
@@ -275,6 +285,7 @@ def main():
                     label_data_names, ModelHyperParams.eos_idx,
                     ModelHyperParams.eos_idx, ModelHyperParams.n_head,
                     ModelHyperParams.d_model)
+                
                 outs = exe.run(trainer_prog,
                                feed=data_input,
                                fetch_list=[sum_cost, avg_cost],
@@ -310,8 +321,8 @@ def main():
 
     if args.local:
         # Initialize the parameters.
+        print("local start_up:")
         exe.run(fluid.framework.default_startup_program())
-        #print("local start_up:")
         #print(debuger.pprint_program_codes(fluid.framework.default_startup_program()))
         for pos_enc_param_name in pos_enc_param_names:
             #print("pos_enc_param_name:", pos_enc_param_name)
@@ -320,34 +331,37 @@ def main():
             pos_enc_param.set(
                 position_encoding_init(ModelHyperParams.max_length + 1,
                                        ModelHyperParams.d_model), place)
-
+         
+        #print "./nist06n/data-%d/part-*" % (args.task_index),
         train_reader = data_util.DataLoader(
-                src_vocab_fpath="./nist06n/cn_30001.dict",
-                trg_vocab_fpath="./nist06n/en_30001.dict",
-                fpattern="./nist06n/data-%d/part-*" % (args.task_index),
-                batch_size=args.batch_size,
-                token_batch_size=TrainTaskConfig.token_batch_size,
-                sort_by_length=TrainTaskConfig.sort_by_length,
-                shuffle=True)
+          src_vocab_fpath="./thirdparty/nist06n/cn_30001.dict",
+          trg_vocab_fpath="./thirdparty/nist06n/en_30001.dict",
+          fpattern="./train/*" % (args.task_index),
+          batch_size=args.batch_size,
+          token_batch_size=TrainTaskConfig.token_batch_size,
+          sort_by_length=TrainTaskConfig.sort_by_length,
+          shuffle=True)
 
         train_loop(exe, fluid.default_main_program())
     else:
-        trainers = int(os.getenv("TRAINERS"))  # total trainer count
-        print("trainers total: ", trainers)
-
-        training_role = os.getenv(
-            "TRAINING_ROLE",
-            "TRAINER")  # get the training role: trainer/pserver
-
+        port = os.getenv("PADDLE_PORT", "6174")
+        pserver_ips = os.getenv("PADDLE_PSERVERS")  # ip,ip...
+        eplist = []
+        for ip in pserver_ips.split(","):
+            eplist.append(':'.join([ip, port]))
+        pserver_endpoints = ",".join(eplist)  # ip:port,ip:port...
+        trainers = int(os.getenv("PADDLE_TRAINERS_NUM", "0"))
+        current_endpoint = os.getenv("POD_IP") + ":" + port
+        trainer_id = int(os.getenv("PADDLE_TRAINER_ID"))
         t = fluid.DistributeTranspiler()
         t.transpile(
-            trainer_id=args.task_index,
-            pservers=args.ps_hosts,
+            trainer_id,
+            pservers=pserver_endpoints,
             trainers=trainers)
-
+             
         if training_role == "PSERVER":
             current_endpoint = os.getenv("POD_IP") + ":" + os.getenv(
-                "PADDLE_INIT_PORT")
+                "PADDLE_PORT")
             if not current_endpoint:
                 print("need env SERVER_ENDPOINT")
                 exit(1)
@@ -370,14 +384,13 @@ def main():
                     block_no+=1
 
             print "begin run"
-            exe.run(pserver_startup)
-            exe.run(pserver_prog)
+            exe.run(pserver_startup)#, save_program_to_file="./pserver_startup.desc")
+            exe.run(pserver_prog)#, save_program_to_file="./pserver_loop.desc")
         elif training_role == "TRAINER":
             # Parameter initialization
             exe.run(fluid.default_startup_program())
 
             #print("cluster start_up:")
-            #print(debuger.pprint_program_codes(fluid.framework.default_startup_program()))
 
             for pos_enc_param_name in pos_enc_param_names:
                 #print("pos_enc_param_name:", pos_enc_param_name)
@@ -387,16 +400,16 @@ def main():
                     position_encoding_init(ModelHyperParams.max_length + 1,
                                            ModelHyperParams.d_model), place)
 
-            #print "/root/data/nist06n/data-%d/part-*" % (args.task_index),
             train_reader = data_util.DataLoader(
-                src_vocab_fpath="./nist06n/cn_30001.dict",
-                trg_vocab_fpath="./nist06n/en_30001.dict",
-                fpattern="./nist06n/data-%d/part-*" % (args.task_index),
+                src_vocab_fpath="./thirdparty/nist06n/cn_30001.dict",
+                trg_vocab_fpath="./thirdparty/nist06n/en_30001.dict",
+                fpattern="./train/part-*",
                 batch_size=args.batch_size,
                 token_batch_size=TrainTaskConfig.token_batch_size,
                 sort_by_length=TrainTaskConfig.sort_by_length,
                 shuffle=True)
 
+            
             trainer_prog = t.get_trainer_program()
             train_loop(exe, trainer_prog)
         else:

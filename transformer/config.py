@@ -4,7 +4,7 @@ class TrainTaskConfig(object):
     pass_num = 100
 
     # the number of sequences contained in a mini-batch.
-    batch_size = 8  # there are memleak in Op::DataTransform. Need double buffer
+    batch_size = 64  # there are memleak in Op::DataTransform. Need double buffer
 
     # the hyper parameters for Adam optimizer.
     learning_rate = 0.001
