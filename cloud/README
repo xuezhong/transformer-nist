@@ -1,16 +1,16 @@
-m_fit_a_line.sh
+fit_a_line_m.sh
 多机 fit a line
 
-s_nmt.sh
+nmt_s.sh
 单机  nmt
 
-m_nmt.sh
+nmt_m.sh
 多机 nmt
 
 
-s_transformer.sh
+transformer_s.sh
 单机  transformer
 
-m_transformer.sh
+transformer_m.sh
 多机  transformer
 
