@@ -322,13 +322,13 @@ def main():
                                        ModelHyperParams.d_model), place)
 
         train_reader = data_util.DataLoader(
-	src_vocab_fpath="./nist06n/cn_30001.dict",
-	trg_vocab_fpath="./nist06n/en_30001.dict",
-	fpattern="./nist06n/data-%d/part-*" % (args.task_index),
-	batch_size=args.batch_size,
-	token_batch_size=TrainTaskConfig.token_batch_size,
-	sort_by_length=TrainTaskConfig.sort_by_length,
-	shuffle=True)
+                src_vocab_fpath="./nist06n/cn_30001.dict",
+                trg_vocab_fpath="./nist06n/en_30001.dict",
+                fpattern="./nist06n/data-%d/part-*" % (args.task_index),
+                batch_size=args.batch_size,
+                token_batch_size=TrainTaskConfig.token_batch_size,
+                sort_by_length=TrainTaskConfig.sort_by_length,
+                shuffle=True)
 
         train_loop(exe, fluid.default_main_program())
     else:
