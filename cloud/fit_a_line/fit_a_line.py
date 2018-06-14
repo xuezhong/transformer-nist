@@ -32,7 +32,6 @@ def train():
     model train
     """
     # init
-    dev_count = fluid.core.get_cuda_device_count()
     use_gpu_flag = os.getenv("PADDLE_USE_GPU", "0")
     print("use_gpu_flag", use_gpu_flag)
     trainer_id_str = os.getenv("PADDLE_TRAINER_ID", "0") 

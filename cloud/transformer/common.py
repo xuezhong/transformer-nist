@@ -28,3 +28,4 @@ train_data_path="/app/ecom/fcr-ad/qiuxuezhong/paddle/data/train/"
 #the output directory on hdfs
 output_path="/app/ecom/fcr-ad/qiuxuezhong/paddle/output"
 thirdparty_path="/app/ecom/fcr-ad/qiuxuezhong/paddle/thirdparty"
+k8s_is_debug=True

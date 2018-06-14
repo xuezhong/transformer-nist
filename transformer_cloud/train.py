@@ -220,12 +220,15 @@ def train(args):
     
     training_role = os.getenv("TRAINING_ROLE", "TRAINER")
     
-    place = fluid.CUDAPlace(0) if TrainTaskConfig.use_gpu else fluid.CPUPlace()
     if training_role == "PSERVER":
         place = fluid.CPUPlace()
+    else:
+        place = fluid.CUDAPlace(0) if TrainTaskConfig.use_gpu else fluid.CPUPlace()
 
     exe = fluid.Executor(place)
-    dev_count = fluid.core.get_cuda_device_count()
+    
+    if TrainTaskConfig.use_gpu and training_role != "PSERVER":
+        dev_count = fluid.core.get_cuda_device_count()
     
     sum_cost, avg_cost, predict, token_num = transformer(
         ModelHyperParams.src_vocab_size, ModelHyperParams.trg_vocab_size,
@@ -235,11 +238,13 @@ def train(args):
         ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
         TrainTaskConfig.label_smooth_eps)
 
-    lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
-                                         TrainTaskConfig.warmup_steps,
-                                         TrainTaskConfig.learning_rate)
+    lr_decay = fluid.layers\
+        .learning_rate_scheduler\
+        .noam_decay(ModelHyperParams.d_model, 
+                    TrainTaskConfig.warmup_steps)
+
     optimizer = fluid.optimizer.Adam(
-        learning_rate=lr_scheduler.learning_rate,
+        learning_rate=lr_decay,
         beta1=TrainTaskConfig.beta1,
         beta2=TrainTaskConfig.beta2,
         epsilon=TrainTaskConfig.eps)
@@ -294,6 +299,7 @@ def train(args):
             fluid.io.load_persistables(exe, TrainTaskConfig.ckpt_path)
             lr_scheduler.current_steps = TrainTaskConfig.start_step
         else:
+            print "init fluid.framework.default_startup_program"
             exe.run(fluid.framework.default_startup_program())
 
         train_data = reader.DataReader(
@@ -317,11 +323,13 @@ def train(args):
         # use token average cost among multi-devices. and the gradient scale is
         # `1 / token_number` for average cost.
         build_strategy.gradient_scale_strategy = fluid.BuildStrategy.GradientScaleStrategy.Customized
+        #'''
         train_exe = fluid.ParallelExecutor(
             use_cuda=TrainTaskConfig.use_gpu,
             loss_name=sum_cost.name,
             main_program=train_progm,
             build_strategy=build_strategy)
+        #'''
 
         def test_context():
             # Context to do validation.
@@ -388,7 +396,7 @@ def train(args):
             for batch_id, data in enumerate(train_data()):
                 feed_list = []
                 total_num_token = 0
-                lr_rate = lr_scheduler.update_learning_rate()
+                #lr_rate = lr_scheduler.update_learning_rate()
                 for place_id, data_buffer in enumerate(split_data(data)):
                     data_input_dict, util_input_dict, num_token = prepare_batch_input(
                         data_buffer, data_input_names, util_input_names,
@@ -396,8 +404,7 @@ def train(args):
                         ModelHyperParams.n_head, ModelHyperParams.d_model)
                     total_num_token += num_token
                     feed_list.append(
-                        dict(data_input_dict.items() + util_input_dict.items() +
-                             {lr_scheduler.learning_rate.name: lr_rate}.items()))
+                        dict(data_input_dict.items() + util_input_dict.items()))
 
                     if not init:
                         for pos_enc_param_name in pos_enc_param_names:
@@ -411,7 +418,7 @@ def train(args):
                         "@GRAD"] = 1. / total_num_token if TrainTaskConfig.use_avg_cost else np.asarray(
                             [1.], dtype="float32")
                 outs = train_exe.run(fetch_list=[sum_cost.name, token_num.name], feed=feed_list)
-                #outs = exe.run(train_progm,fetch_list=[sum_cost.name, token_nm.name],feed=data_input_dict)
+                #outs = exe.run(train_progm,fetch_list=[sum_cost.name, token_num.name],feed=feed_list[0])
                 sum_cost_val, token_num_val = np.array(outs[0]), np.array(outs[1])
                 total_sum_cost = sum_cost_val.sum(
                 )  # sum the cost from multi-devices
@@ -465,11 +472,17 @@ def train(args):
                                                     pserver_prog)
 
             print "psserver begin run"
+            with open('pserver_startup', 'w') as f:
+               f.write(str(pserver_startup))
+            with open('pserver_prog', 'w') as f:
+               f.write(str(pserver_prog))
             exe.run(pserver_startup)#, save_program_to_file="./pserver_startup.desc")
             exe.run(pserver_prog)#, save_program_to_file="./pserver_loop.desc")
         elif training_role == "TRAINER":
 
             trainer_prog = t.get_trainer_program()
+            with open('trainer_prog', 'w') as f:
+               f.write(str(trainer_prog))
             train_loop(exe, trainer_prog)
         else:
             print("environment var TRAINER_ROLE should be TRAINER os PSERVER")
