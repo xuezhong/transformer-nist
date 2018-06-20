@@ -1,13 +1,17 @@
-paddlecloud job train --cluster_name paddle-jpaas-ai00 \
---job_version custom-fluid \
---k8s_gpu_type baidu/gpu_p40 \
---k8s_gpu_cards 4 \
---k8s_priority high \
---k8s_walltime 10:00:00 \
---k8s_memory 100Gi \
---k8s_is_local 0 \
---k8s_trainers 2 \
---k8s_pservers_count 1 \
---k8s_pscpu_cores 1 \
---k8s_psmemory 20Gi m_transformer transformer/run.py transformer/common.py \
---version_image_addr "registry.baidu.com/paddlecloud/paddlecloud-runenv-centos6u3-online:paddlecloud-latest-dev-gcc482-cuda8.0_cudnn5"
+paddlecloud job train --cluster-name paddle-jpaas-ai00 \
+--job-version custom-fluid \
+--k8s-gpu-type baidu/gpu_p40 \
+--k8s-gpu-cards 4 \
+--k8s-priority high \
+--k8s-wall-time 10:00:00 \
+--k8s-memory 100Gi \
+--k8s-ps-memory 20Gi \
+--job-name m-transformer \
+--start-cmd "python transformer/run.py" \
+--job-conf transformer/common.py \
+--files transformer/run.py transformer/common.py \
+--k8s-not-local  \
+--k8s-trainers 4 \
+--k8s-ps-num 2 \
+--k8s-ps-cores 1 \
+--image-addr "registry.baidu.com/paddlecloud/paddlecloud-runenv-centos6u3-online:paddlecloud-latest-dev-gcc482-cuda8.0_cudnn5"
