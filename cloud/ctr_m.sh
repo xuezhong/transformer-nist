@@ -1,0 +1,17 @@
+paddlecloud job train --cluster-name paddle-jpaas-ai00 \
+--job-version custom-fluid \
+--k8s-gpu-type baidu/gpu_p40 \
+--k8s-gpu-cards 4 \
+--k8s-priority high \
+--k8s-wall-time 10:00:00 \
+--k8s-memory 100Gi \
+--k8s-ps-memory 20Gi \
+--job-name m-transformer \
+--start-cmd "python ctr/run.py" \
+--job-conf ctr/common.py \
+--files ctr/run.py ctr/common.py \
+--k8s-not-local  \
+--k8s-trainers 10 \
+--k8s-ps-num 2 \
+--k8s-ps-cores 1 \
+--image-addr "registry.baidu.com/paddlecloud/paddlecloud-runenv-centos6u3-online:paddlecloud-latest-dev-gcc482-cuda8.0_cudnn5"

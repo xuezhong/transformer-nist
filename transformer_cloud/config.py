@@ -25,7 +25,7 @@ class TrainTaskConfig(object):
     ckpt_dir = "trained_ckpts"
     # the directory for loading checkpoint.
     # If provided, continue training from the checkpoint.
-    ckpt_path = None
+    ckpt_path = "trained_ckpts/pass_29.checkpointvim"
     # the parameter to initialize the learning rate scheduler.
     # It should be provided if use checkpoints, since the checkpoint doesn't
     # include the training step counter currently.

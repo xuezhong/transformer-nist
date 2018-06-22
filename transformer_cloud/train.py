@@ -297,7 +297,7 @@ def train(args):
         # Initialize the parameters.
         if TrainTaskConfig.ckpt_path:
             fluid.io.load_persistables(exe, TrainTaskConfig.ckpt_path)
-            lr_scheduler.current_steps = TrainTaskConfig.start_step
+            #lr_scheduler.current_steps = TrainTaskConfig.start_step
         else:
             print "init fluid.framework.default_startup_program"
             exe.run(fluid.framework.default_startup_program())
