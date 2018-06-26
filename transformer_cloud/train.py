@@ -3,6 +3,7 @@ import time
 import argparse
 import ast
 import numpy as np
+import multiprocessing
 
 import paddle
 import paddle.fluid as fluid
@@ -83,6 +84,12 @@ def parse_args():
         type=ast.literal_eval,
         default=True,
         help='Whether to run as local mode.')
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='GPU',
+        choices=['CPU', 'GPU'],
+        help="The device type.")
 
     args = parser.parse_args()
     # Append args related to dict
@@ -210,25 +217,27 @@ def prepare_batch_input(insts, data_input_names, util_input_names, src_pad_idx,
 
 
 def train(args):
+    # priority: ENV > args > config
     is_local = os.getenv("PADDLE_IS_LOCAL", "1")
-    print is_local
     if is_local == '0':
         args.local = False
     else:
         args.local = True
     print args
     
+    if args.device == 'CPU':
+        TrainTaskConfig.use_gpu = False
+
     training_role = os.getenv("TRAINING_ROLE", "TRAINER")
     
-    if training_role == "PSERVER":
+    if training_role == "PSERVER" or (not TrainTaskConfig.use_gpu):
         place = fluid.CPUPlace()
+        dev_count = int(os.environ.get('CPU_NUM', multiprocessing.cpu_count()))
     else:
-        place = fluid.CUDAPlace(0) if TrainTaskConfig.use_gpu else fluid.CPUPlace()
+        place = fluid.CUDAPlace(0)
+        dev_count = fluid.core.get_cuda_device_count()
 
     exe = fluid.Executor(place)
-    
-    if TrainTaskConfig.use_gpu and training_role != "PSERVER":
-        dev_count = fluid.core.get_cuda_device_count()
     
     sum_cost, avg_cost, predict, token_num = transformer(
         ModelHyperParams.src_vocab_size, ModelHyperParams.trg_vocab_size,
@@ -323,13 +332,11 @@ def train(args):
         # use token average cost among multi-devices. and the gradient scale is
         # `1 / token_number` for average cost.
         build_strategy.gradient_scale_strategy = fluid.BuildStrategy.GradientScaleStrategy.Customized
-        #'''
         train_exe = fluid.ParallelExecutor(
             use_cuda=TrainTaskConfig.use_gpu,
             loss_name=sum_cost.name,
             main_program=train_progm,
             build_strategy=build_strategy)
-        #'''
 
         def test_context():
             # Context to do validation.
@@ -419,7 +426,6 @@ def train(args):
                             [1.], dtype="float32")
                 outs = train_exe.run(fetch_list=[sum_cost.name, token_num.name], feed=feed_list)
                 train_exe.bcast_params()
-                #outs = exe.run(train_progm,fetch_list=[sum_cost.name, token_num.name],feed=feed_list[0])
                 sum_cost_val, token_num_val = np.array(outs[0]), np.array(outs[1])
                 total_sum_cost = sum_cost_val.sum(
                 )  # sum the cost from multi-devices
@@ -490,5 +496,4 @@ def train(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    #a = raw_input("input:")
     train(args)
