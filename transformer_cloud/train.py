@@ -44,9 +44,11 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=2000,
+        default=2048,
         help="The number of sequences contained in a mini-batch, or the maximum "
-        "number of tokens (include paddings) contained in a mini-batch.")
+        "number of tokens (include paddings) contained in a mini-batch. Note "
+        "that this represents the number on single device and the actual batch "
+        "size for multi-devices will multiply the device number.")
     parser.add_argument(
         "--pool_size",
         type=int,
@@ -221,8 +223,6 @@ def train(args):
     is_local = os.getenv("PADDLE_IS_LOCAL", "1")
     if is_local == '0':
         args.local = False
-    else:
-        args.local = True
     print args
     
     if args.device == 'CPU':
@@ -245,19 +245,29 @@ def train(args):
         ModelHyperParams.n_head, ModelHyperParams.d_key,
         ModelHyperParams.d_value, ModelHyperParams.d_model,
         ModelHyperParams.d_inner_hid, ModelHyperParams.dropout,
-        TrainTaskConfig.label_smooth_eps)
+        ModelHyperParams.weight_sharing, TrainTaskConfig.label_smooth_eps)
+    if args.local:
+		lr_scheduler = LearningRateScheduler(ModelHyperParams.d_model,
+											 TrainTaskConfig.warmup_steps,
+											 TrainTaskConfig.learning_rate)
+		optimizer = fluid.optimizer.Adam(
+			learning_rate=lr_scheduler.learning_rate,
+			beta1=TrainTaskConfig.beta1,
+			beta2=TrainTaskConfig.beta2,
+			epsilon=TrainTaskConfig.eps)
+		optimizer.minimize(sum_cost)
+    else:
+		lr_decay = fluid.layers\
+			.learning_rate_scheduler\
+			.noam_decay(ModelHyperParams.d_model, 
+						TrainTaskConfig.warmup_steps)
 
-    lr_decay = fluid.layers\
-        .learning_rate_scheduler\
-        .noam_decay(ModelHyperParams.d_model, 
-                    TrainTaskConfig.warmup_steps)
-
-    optimizer = fluid.optimizer.Adam(
-        learning_rate=lr_decay,
-        beta1=TrainTaskConfig.beta1,
-        beta2=TrainTaskConfig.beta2,
-        epsilon=TrainTaskConfig.eps)
-    optimizer.minimize(sum_cost)
+		optimizer = fluid.optimizer.Adam(
+			learning_rate=lr_decay,
+			beta1=TrainTaskConfig.beta1,
+			beta2=TrainTaskConfig.beta2,
+			epsilon=TrainTaskConfig.eps)
+		optimizer.minimize(sum_cost)
 
     def train_loop(exe, train_progm):
 
@@ -403,15 +413,17 @@ def train(args):
             for batch_id, data in enumerate(train_data()):
                 feed_list = []
                 total_num_token = 0
-                #lr_rate = lr_scheduler.update_learning_rate()
                 for place_id, data_buffer in enumerate(split_data(data)):
                     data_input_dict, util_input_dict, num_token = prepare_batch_input(
                         data_buffer, data_input_names, util_input_names,
                         ModelHyperParams.eos_idx, ModelHyperParams.eos_idx,
                         ModelHyperParams.n_head, ModelHyperParams.d_model)
                     total_num_token += num_token
-                    feed_list.append(
-                        dict(data_input_dict.items() + util_input_dict.items()))
+                    feed_kv_pairs = data_input_dict.items() + util_input_dict.items()
+                    if args.local:
+                        lr_rate = lr_scheduler.update_learning_rate()
+                        feed_kv_pairs += {lr_scheduler.learning_rate.name: lr_rate}.items()
+                    feed_list.append(dict(feed_kv_pairs))
 
                     if not init:
                         for pos_enc_param_name in pos_enc_param_names:
@@ -420,15 +432,11 @@ def train(args):
                                 ModelHyperParams.d_model)
                             feed_list[place_id][pos_enc_param_name] = pos_enc
                 for feed_dict in feed_list:
-                    feed_dict[
-                        sum_cost.name +
-                        "@GRAD"] = 1. / total_num_token if TrainTaskConfig.use_avg_cost else np.asarray(
-                            [1.], dtype="float32")
+                    feed_dict[sum_cost.name + "@GRAD"] = 1. / total_num_token
                 outs = train_exe.run(fetch_list=[sum_cost.name, token_num.name], feed=feed_list)
                 train_exe.bcast_params()
                 sum_cost_val, token_num_val = np.array(outs[0]), np.array(outs[1])
-                total_sum_cost = sum_cost_val.sum(
-                )  # sum the cost from multi-devices
+                total_sum_cost = sum_cost_val.sum()  # sum the cost from multi-devices
                 total_token_num = token_num_val.sum()
                 total_avg_cost = total_sum_cost / total_token_num
                 print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f" %
@@ -479,16 +487,16 @@ def train(args):
                                                     pserver_prog)
 
             print "psserver begin run"
-            with open('pserver_startup', 'w') as f:
+            with open('pserver_startup.desc', 'w') as f:
                f.write(str(pserver_startup))
-            with open('pserver_prog', 'w') as f:
+            with open('pserver_prog.desc', 'w') as f:
                f.write(str(pserver_prog))
-            exe.run(pserver_startup)#, save_program_to_file="./pserver_startup.desc")
-            exe.run(pserver_prog)#, save_program_to_file="./pserver_loop.desc")
+            exe.run(pserver_startup)
+            exe.run(pserver_prog)
         elif training_role == "TRAINER":
 
             trainer_prog = t.get_trainer_program()
-            with open('trainer_prog', 'w') as f:
+            with open('trainer_prog.desc', 'w') as f:
                f.write(str(trainer_prog))
             train_loop(exe, trainer_prog)
         else:
