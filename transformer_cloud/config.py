@@ -38,7 +38,7 @@ class InferTaskConfig(object):
     batch_size = 10
     # the parameters for beam search.
     beam_size = 5
-    max_length = 30
+    max_length = 100
     # the number of decoded sentences to output.
     n_best = 1
     # the flags indicating whether to output the special tokens.

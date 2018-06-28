@@ -6,11 +6,11 @@ paddlecloud job train \
 --k8s-memory 100Gi \
 --k8s-ps-memory 20Gi \
 --job-name m-cpu-transformer \
---start-cmd "python -u thirdparty/model/transformer_cloud/train.py --src_vocab_fpath ./thirdparty/nist06n/cn_30001.dict --trg_vocab_fpath ./thirdparty/nist06n/en_30001.dict --train_file_pattern './train/part-*' --batch_size 1024 --use_token_batch True  --device CPU --special_token '_GO' '_EOS' '_UNK'" \
+--start-cmd "python -u run_cpu.py" \
 --job-conf transformer/common.py \
---files transformer/common.py \
+--files transformer/common.py transformer/run_cpu.py \
 --k8s-not-local  \
 --k8s-trainers 4 \
 --k8s-ps-num 2 \
 --k8s-ps-cores 1 \
---image-addr registry.baidu.com/qiaolongfei/paddlepaddle-cpu:ctr
+--image-addr registry.baidu.com/qiuxuezhong/paddlepaddle-cpu:test
