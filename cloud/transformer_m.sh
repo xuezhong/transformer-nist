@@ -7,7 +7,7 @@ paddlecloud job train --cluster-name paddle-jpaas-ai00 \
 --k8s-memory 100Gi \
 --k8s-ps-memory 20Gi \
 --job-name m-transformer \
---start-cmd "python transformer/run.py" \
+--start-cmd "python run.py" \
 --job-conf transformer/common.py \
 --files transformer/run.py transformer/common.py \
 --k8s-not-local  \

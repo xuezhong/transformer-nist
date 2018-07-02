@@ -43,7 +43,7 @@ class InferTaskConfig(object):
     output_unk = False
 
     # the directory for loading the trained model.
-    model_path = "trained_models/pass_1.infer.model"
+    model_path = "../../pass_29.infer.model"
 
 
 class ModelHyperParams(object):

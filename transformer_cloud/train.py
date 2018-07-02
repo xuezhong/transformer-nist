@@ -92,6 +92,11 @@ def parse_args():
         default='GPU',
         choices=['CPU', 'GPU'],
         help="The device type.")
+    parser.add_argument(
+        '--sync',
+        type=ast.literal_eval,
+        default=True,
+        help="sync mode.")
 
     args = parser.parse_args()
     # Append args related to dict
@@ -255,6 +260,9 @@ def train(args):
 			beta1=TrainTaskConfig.beta1,
 			beta2=TrainTaskConfig.beta2,
 			epsilon=TrainTaskConfig.eps)
+		optimizer.minimize(sum_cost)
+    elif args.sync == False or args.sync == True:
+                optimizer = fluid.optimizer.SGD(0.003)
 		optimizer.minimize(sum_cost)
     else:
 		lr_decay = fluid.layers\
@@ -474,7 +482,8 @@ def train(args):
         t.transpile(
             trainer_id,
             pservers=pserver_endpoints,
-            trainers=trainers)
+            trainers=trainers,
+            sync_mode=True)
              
         if training_role == "PSERVER":
             current_endpoint = os.getenv("POD_IP") + ":" + os.getenv(
