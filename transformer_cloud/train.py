@@ -11,7 +11,7 @@ import paddle.fluid as fluid
 from model import transformer, position_encoding_init
 from optim import LearningRateScheduler
 from config import *
-import reader
+import reader_simple
 
 
 def parse_args():
@@ -100,8 +100,8 @@ def parse_args():
 
     args = parser.parse_args()
     # Append args related to dict
-    src_dict = reader.DataReader.load_dict(args.src_vocab_fpath)
-    trg_dict = reader.DataReader.load_dict(args.trg_vocab_fpath)
+    src_dict = reader_simple.DataReader.load_dict(args.src_vocab_fpath)
+    trg_dict = reader_simple.DataReader.load_dict(args.trg_vocab_fpath)
     dict_args = [
         "src_vocab_size", str(len(src_dict)), "trg_vocab_size",
         str(len(trg_dict)), "bos_idx", str(src_dict[args.special_token[0]]),
@@ -261,7 +261,7 @@ def train(args):
 			beta2=TrainTaskConfig.beta2,
 			epsilon=TrainTaskConfig.eps)
 		optimizer.minimize(sum_cost)
-    elif args.sync == False or args.sync == True:
+    elif args.sync == False:
                 optimizer = fluid.optimizer.SGD(0.003)
 		optimizer.minimize(sum_cost)
     else:
@@ -329,7 +329,7 @@ def train(args):
             print "init fluid.framework.default_startup_program"
             exe.run(fluid.framework.default_startup_program())
 
-        train_data = reader.DataReader(
+        train_data = reader_simple.DataReader(
             src_vocab_fpath=args.src_vocab_fpath,
             trg_vocab_fpath=args.trg_vocab_fpath,
             fpattern=args.train_file_pattern,
@@ -362,7 +362,7 @@ def train(args):
             with fluid.program_guard(test_program):
                 test_program = fluid.io.get_inference_program([avg_cost])
 
-            val_data = reader.DataReader(
+            val_data = reader_simple.DataReader(
                 src_vocab_fpath=args.src_vocab_fpath,
                 trg_vocab_fpath=args.trg_vocab_fpath,
                 fpattern=args.val_file_pattern,

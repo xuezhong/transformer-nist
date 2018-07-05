@@ -150,6 +150,7 @@ class DataReader(object):
                  end_mark="<e>",
                  unk_mark="<unk>",
                  seed=0):
+        self._fpattern = fpattern
         self._src_vocab = self.load_dict(src_vocab_fpath)
         self._only_src = True
         if trg_vocab_fpath is not None:
@@ -166,36 +167,13 @@ class DataReader(object):
         self._max_length = max_length
         self._delimiter = delimiter
         self._epoch_batches = []
-
-        src_seq_words, trg_seq_words = self._load_data(fpattern, tar_fname)
-        print len(src_seq_words)
-        self._src_seq_ids = [[
-            self._src_vocab.get(word, self._src_vocab.get(unk_mark))
-            for word in ([start_mark] + src_seq + [end_mark])
-        ] for src_seq in src_seq_words]
-
-        self._sample_count = len(self._src_seq_ids)
-
-        if not self._only_src:
-            self._trg_seq_ids = [[
-                self._trg_vocab.get(word, self._trg_vocab.get(unk_mark))
-                for word in ([start_mark] + trg_seq + [end_mark])
-            ] for trg_seq in trg_seq_words]
-            if len(self._trg_seq_ids) != self._sample_count:
-                raise Exception("Inconsistent sample count between "
-                                "source sequences and target sequences.")
-        else:
-            self._trg_seq_ids = None
-
-        self._sample_idxs = [i for i in xrange(self._sample_count)]
-        self._sorted = False
-
+        self._start_mark = start_mark
+        self._end_mark = end_mark
+        self._unk_mark = unk_mark
         random.seed(seed)
 
-    def _parse_file(self, f_obj):
-        src_seq_words = []
-        trg_seq_words = []
-
+    def _parse_file(self, fpath):
+        f_obj = open(fpath, 'r')
         for line in f_obj:
             fields = line.strip().split(self._delimiter)
 
@@ -220,37 +198,8 @@ class DataReader(object):
 
             if not is_valid_sample: continue
 
-            src_seq_words.append(sample_words[0])
-
-            if not self._only_src:
-                trg_seq_words.append(sample_words[1])
-
-        return (src_seq_words, trg_seq_words)
-
-    def _load_data(self, fpattern, tar_fname):
-        fpaths = glob.glob(fpattern)
-
-        src_seq_words = []
-        trg_seq_words = []
-
-        if len(fpaths) == 1 and tarfile.is_tarfile(fpaths[0]):
-            if tar_fname is None:
-                raise Exception("If tar file provided, please set tar_fname.")
-
-            f = tarfile.open(fpaths[0], 'r')
-            part_file_data = self._parse_file(f.extractfile(tar_fname))
-            src_seq_words = part_file_data[0]
-            trg_seq_words = part_file_data[1]
-        else:
-            for fpath in fpaths:
-                if not os.path.isfile(fpath):
-                    raise IOError("Invalid file: %s" % fpath)
-
-                part_file_data = self._parse_file(open(fpath, 'r'))
-                src_seq_words.extend(part_file_data[0])
-                trg_seq_words.extend(part_file_data[1])
-
-        return src_seq_words, trg_seq_words
+            #print sample_words[0], sample_words[1]
+            yield sample_words[0], sample_words[1]
 
     @staticmethod
     def load_dict(dict_path, reverse=False):
@@ -264,23 +213,31 @@ class DataReader(object):
         return word_dict
 
     def _sample_generator(self):
-        if self._sort_type == SortType.GLOBAL:
-            if not self._sorted:
-                self._sample_idxs.sort(
-                    key=lambda idx: max(len(self._src_seq_ids[idx]),
-                    len(self._trg_seq_ids[idx] if not self._only_src else 0))
-                )
-                self._sorted = True
-        elif self._shuffle:
-            random.shuffle(self._sample_idxs)
+        fpaths = glob.glob(self._fpattern)
 
-        for sample_idx in self._sample_idxs:
-            if self._only_src:
-                yield (self._src_seq_ids[sample_idx])
-            else:
-                yield (self._src_seq_ids[sample_idx],
-                       self._trg_seq_ids[sample_idx][:-1],
-                       self._trg_seq_ids[sample_idx][1:])
+        for fpath in fpaths:
+            if not os.path.isfile(fpath):
+                raise IOError("Invalid file: %s" % fpath)
+            
+            line = self._parse_file(fpath) 
+            while(True):
+                try:
+                    src_seq_word, trg_seq_word = line.next()
+
+                    #print src_seq_word, trg_seq_word
+                    src_seq_id = [
+                        self._src_vocab.get(word, self._src_vocab.get(self._unk_mark))
+                        for word in ([self._start_mark] + src_seq_word + [self._end_mark])
+                    ]
+                    trg_seq_id = [
+                        self._src_vocab.get(word, self._src_vocab.get(self._unk_mark))
+                        for word in ([self._start_mark] + trg_seq_word + [self._end_mark])
+                    ]
+                    yield (src_seq_id, trg_seq_id[:-1], trg_seq_id[1:])
+                
+                except StopIteration as e:
+                    break
+
 
     def batch_generator(self):
         pool = Pool(self._sample_generator, self._pool_size, True

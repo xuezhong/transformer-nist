@@ -53,9 +53,9 @@ class ModelHyperParams(object):
     # These following five vocabularies related configurations will be set
     # automatically according to the passed vocabulary path and special tokens.
     # size of source word dictionary.
-    src_vocab_size = 10000
+    src_vocab_size = 1536984
     # size of target word dictionay
-    trg_vocab_size = 10000
+    trg_vocab_size = 626697
     # index for <bos> token
     bos_idx = 0
     # index for <eos> token
