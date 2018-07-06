@@ -342,6 +342,7 @@ def train(args):
             start_mark=args.special_token[0],
             end_mark=args.special_token[1],
             unk_mark=args.special_token[2],
+            max_length=ModelHyperParams.max_length - 2,
             clip_last_batch=False)
 
         train_data = read_multiple(reader=train_data.batch_generator)
@@ -374,6 +375,7 @@ def train(args):
                 start_mark=args.special_token[0],
                 end_mark=args.special_token[1],
                 unk_mark=args.special_token[2],
+                max_length=ModelHyperParams.max_length - 2,
                 clip_last_batch=False,
                 shuffle=False,
                 shuffle_batch=False)
