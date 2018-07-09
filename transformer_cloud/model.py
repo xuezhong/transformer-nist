@@ -193,21 +193,18 @@ def prepare_encoder(src_word,
     [batch_size, max_src_length_in_batch, d_model].
     This module is used at the bottom of the encoder stacks.
     """
-    print src_vocab_size, src_emb_dim
     src_word_emb = layers.embedding(
         src_word,
         size=[src_vocab_size, src_emb_dim],
         param_attr=fluid.ParamAttr(
             name=word_emb_param_name,
             initializer=fluid.initializer.Normal(0., src_emb_dim**-0.5)))
-    layers.Print(src_word_emb)
     src_word_emb = layers.scale(x=src_word_emb, scale=src_emb_dim**0.5)
     src_pos_enc = layers.embedding(
         src_pos,
         size=[src_max_len, src_emb_dim],
         param_attr=fluid.ParamAttr(
             name=pos_enc_param_name, trainable=False))
-    layers.Print(src_pos_enc)
     enc_input = src_word_emb + src_pos_enc
     enc_input = layers.reshape(
         x=enc_input,

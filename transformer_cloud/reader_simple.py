@@ -230,9 +230,12 @@ class DataReader(object):
                         for word in ([self._start_mark] + src_seq_word + [self._end_mark])
                     ]
                     trg_seq_id = [
-                        self._src_vocab.get(word, self._src_vocab.get(self._unk_mark))
+                        self._trg_vocab.get(word, self._trg_vocab.get(self._unk_mark))
                         for word in ([self._start_mark] + trg_seq_word + [self._end_mark])
                     ]
+                    for i in trg_seq_id:
+                        if i > len(self._trg_vocab):
+                            print "except trg_seq | " + " ".join(trg_seq_word) + ' | ' + ' '.join([str(j) for j in trg_seq_id])
                     yield (src_seq_id, trg_seq_id[:-1], trg_seq_id[1:])
                 
                 except StopIteration as e:
