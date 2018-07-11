@@ -28,6 +28,9 @@ def get_file_list_static():
     print("FILELIST:" + str(FILELIST))
     return FILELIST
 
+def get_test_file_list():
+    return ['test_shitu']
+
 def get_file_list():
     args = parse_args()
     data_dir = args.data_dir
@@ -40,8 +43,8 @@ def get_file_list():
     return FILELIST
 
 PASS_NUM = 10
-EMBED_SIZE = 1
-BATCH_SIZE = 1
+EMBED_SIZE = 128
+BATCH_SIZE = 1024
 IS_SPARSE = True
 CNN_DIM = 128
 CNN_FILTER_SIZE = 5
@@ -160,6 +163,24 @@ def train(pserver_endpoints,
     feeder = fluid.DataFeeder(feed_list=data_list, place=place)
     
     ctr = ctrdata.CTRData()
+   
+    def test(main_program):
+        # prepare data
+        test_program=main_program.clone()
+        test_data = paddle.batch(
+            paddle.reader.shuffle(
+                ctr.train(get_test_file_list()), buf_size=1024 * 100),
+            batch_size=BATCH_SIZE)
+
+	auc = Auc(name="auc")
+	batch_id = 0
+	for data in test_data():
+	    cost_val, acc_val, label_val, predict_val = exe.run(test_program,
+					feed=feeder.feed(data),
+					fetch_list=[avg_cost, accuracy, label, predict])
+	    label_val = label_val.reshape(len(label_val))
+	    auc.update(predict_val, label_val)
+	return auc.eval()
 
     def train_loop(main_program):
         # prepare data
@@ -175,7 +196,7 @@ def train(pserver_endpoints,
             auc = Auc(name="auc")
             batch_id = 0
             for data in train_data():
-                print(data)
+                #print(data)
                 cost_val, acc_val, label_val, predict_val = exe.run(main_program,
                                             feed=feeder.feed(data),
                                             fetch_list=[avg_cost, accuracy, label, predict])
@@ -188,7 +209,8 @@ def train(pserver_endpoints,
                     if math.isnan(float(cost_val)):
                         sys.exit("got NaN loss, training failed.")
                 batch_id += 1
-            print("pass_id=" + str(pass_id) + " auc=" + str(auc.eval()))
+            test_auc=test(main_program) 
+            print("pass_id=" + str(pass_id) + " auc=" + str(auc.eval()) + " test auc=" + str(test_auc))
 
     if is_local:
         train_loop(fluid.default_main_program())
