@@ -321,7 +321,6 @@ def test_context(train_progm, avg_cost, train_exe, dev_count, data_input_names,
     return test
 
 
-def save_model(pass_id, batch_id=0):
     fluid.io.save_persistables(
 	exe,
 	os.path.join(TrainTaskConfig.ckpt_dir,
@@ -423,15 +422,22 @@ def train_loop(exe, train_progm, dev_count, sum_cost, avg_cost, lr_scheduler,
             print("epoch: %d, batch: %d, sum loss: %f, avg loss: %f, ppl: %f" %
                   (pass_id, batch_id, total_sum_cost, total_avg_cost,
                    np.exp([min(total_avg_cost, 100)])))
-            if batch_id % 10000 == 0 and batch_id != 0:
-                save_model(pass_idi, batch_id) 
+            if batch_id % 10000 == 0:
+                fluid.io.save_persistables(
+                    exe,
+                    os.path.join(TrainTaskConfig.ckpt_dir,
+                                 "pass_" + str(pass_id) + "_batch_" + str(batch_id) + ".checkpoint"))
+                fluid.io.save_inference_model(
+                    os.path.join(TrainTaskConfig.model_dir,
+                                 "pass_" + str(pass_id) + "_batch_" + str(batch_id) + ".infer.model"),
+                    data_input_names[:-2] + util_input_names, [predict], exe)
+
             init = True
         # Validate and save the model for inference.
         print("epoch: %d, " % pass_id +
               ("val avg loss: %f, val ppl: %f, " % test()
                if args.val_file_pattern is not None else "") + "consumed %fs" %
               (time.time() - pass_start_time))
-        save_model(pass_id) 
 
 
 def train(args):

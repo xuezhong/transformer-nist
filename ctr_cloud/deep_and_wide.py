@@ -6,21 +6,46 @@ import paddle
 import paddle.fluid as fluid
 import sys
 import ctrdata
+import time
+import numpy as np
 
 from paddle.fluid.metrics import Auc
 
 import argparse
 
+
 def parse_args():
-    parser = argparse.ArgumentParser("Training for Transformer.")
+    parser = argparse.ArgumentParser("Training for CTR model.")
     parser.add_argument(
-        "--data_dir",
+        "--train_data_dir",
         type=str,
-        required=False,
-        default='data',
-        help="The path of vocabulary file of source language.")
+        required=True,
+        help="The path of training data.")
+    parser.add_argument(
+        "--test_data_dir",
+        type=str,
+        required=True,
+        help="The path of testing data.")
+    parser.add_argument(
+        "--batch_size",
+        type=str,
+        required=True,
+        help="Train batch size.")
+    parser.add_argument(
+        "--cpu_num",
+        type=str,
+        required=True,
+        help="train cpu number.")
+    parser.add_argument(
+        "--use_parallel_exe",
+        type=int,
+        default=1,
+        help="if use parallel_executor.")
     return parser.parse_args()
 
+args = parse_args()
+os.environ['CPU_NUM'] = args.cpu_num
+use_parallel_executor = bool(args.use_parallel_exe)
 
 def get_file_list_static():
     FILELIST = ['./test_shitu']
@@ -28,12 +53,7 @@ def get_file_list_static():
     print("FILELIST:" + str(FILELIST))
     return FILELIST
 
-def get_test_file_list():
-    return ['test_shitu']
-
-def get_file_list():
-    args = parse_args()
-    data_dir = args.data_dir
+def get_file_list(data_dir):
     data_files = os.listdir(data_dir)
     FILELIST = list()
     for data_file in data_files:
@@ -42,9 +62,8 @@ def get_file_list():
     print("FILELIST:" + str(FILELIST))
     return FILELIST
 
-PASS_NUM = 10
+PASS_NUM = 20
 EMBED_SIZE = 128
-BATCH_SIZE = 1024
 IS_SPARSE = True
 CNN_DIM = 128
 CNN_FILTER_SIZE = 5
@@ -133,8 +152,8 @@ def train(pserver_endpoints,
     predict = fluid.layers.fc(input=fc3, size=2, act="softmax")
 
     label = fluid.layers.data(name='label', shape=[1], dtype='int64')
-    cost = fluid.layers.cross_entropy(input=predict, label=label)
     accuracy = fluid.layers.accuracy(input=predict, label=label)
+    cost = fluid.layers.cross_entropy(input=predict, label=label)
     avg_cost = fluid.layers.mean(cost)
 
     sgd_optimizer = fluid.optimizer.Adam(learning_rate=0.003)
@@ -163,54 +182,88 @@ def train(pserver_endpoints,
     feeder = fluid.DataFeeder(feed_list=data_list, place=place)
     
     ctr = ctrdata.CTRData()
-   
+
     def test(main_program):
         # prepare data
         test_program=main_program.clone()
+        with fluid.program_guard(test_program):
+            test_program = fluid.io.get_inference_program([avg_cost, accuracy, predict])
         test_data = paddle.batch(
             paddle.reader.shuffle(
-                ctr.train(get_test_file_list()), buf_size=1024 * 100),
-            batch_size=BATCH_SIZE)
+                ctr.train(get_file_list(args.test_data_dir)), buf_size=1024 * 1),
+            batch_size=int(args.batch_size))
 
-	auc = Auc(name="auc")
-	batch_id = 0
-	for data in test_data():
-	    cost_val, acc_val, label_val, predict_val = exe.run(test_program,
-					feed=feeder.feed(data),
-					fetch_list=[avg_cost, accuracy, label, predict])
-	    label_val = label_val.reshape(len(label_val))
-	    auc.update(predict_val, label_val)
-	return auc.eval()
+        auc = Auc(name="auc")
+        batch_id = 0
+        for data in test_data():
+            cost_val, acc_val, label_val, predict_val = exe.run(test_program,
+                        feed=feeder.feed(data),
+                        fetch_list=[avg_cost, accuracy, label, predict])
+            label_val = label_val.reshape(len(label_val))
+            auc.update(predict_val, label_val)
+        return auc.eval()
 
     def train_loop(main_program):
         # prepare data
         train_data = paddle.batch(
             paddle.reader.shuffle(
-                ctr.train(get_file_list()), buf_size=1024 * 100),
-            batch_size=BATCH_SIZE)
+                ctr.train(get_file_list(args.train_data_dir)), buf_size=1024 * 100),
+            batch_size=int(args.batch_size))
 
         exe.run(fluid.default_startup_program())
 
+        if use_parallel_executor:
+            pe = fluid.ParallelExecutor(
+                use_cuda=False, loss_name=avg_cost.name, main_program=main_program)
+
         print("start to run")
         for pass_id in xrange(PASS_NUM):
-            auc = Auc(name="auc")
+            pass_start = time.time()
             batch_id = 0
+            data_start_time = 0
             for data in train_data():
-                #print(data)
-                cost_val, acc_val, label_val, predict_val = exe.run(main_program,
-                                            feed=feeder.feed(data),
-                                            fetch_list=[avg_cost, accuracy, label, predict])
+                start_time = time.time()
+
+                if use_parallel_executor:
+                    cost_val, acc_val, label_val, predict_val = pe.run(
+                        feed=feeder.feed(data),
+                        fetch_list=[avg_cost.name, accuracy.name, label.name, predict.name])
+                    cost_val = np.mean(cost_val)
+                    acc_val = np.mean(acc_val)
+                else:
+                    cost_val, acc_val, label_val, predict_val = exe.run(
+                        main_program,
+                        feed=feeder.feed(data),
+                        fetch_list=[avg_cost, accuracy, label, predict]
+                    )
+
+                end_time = time.time()
                 label_val = label_val.reshape(len(label_val))
-                auc.update(predict_val, label_val)
                 if batch_id % 10 == 0:
-                    #print("label=" + str(label_val))
-                    #print("predict=" + str(predict_val))
-                    print("pass_id=" + str(pass_id) + " batch_id=" + str(batch_id) + " cost=" + str(cost_val) + " acc=" + str(acc_val))
+                    read_data_time = start_time - data_start_time
+                    train_batch_time = end_time - start_time
+                    sample_per_second = float(len(data)) / train_batch_time
+                    time_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+                    print(str(time_stamp) +
+                          " pass_id=" + str(pass_id) +
+                          " batch_id=" + str(batch_id) +
+                          " cost=" + str(cost_val) +
+                          " acc=" + str(acc_val) +
+                          " read_data_time=" + str(read_data_time) +
+                          " train_batch_time=" + str(train_batch_time) +
+                          " sample_per_second=" + str(sample_per_second))
                     if math.isnan(float(cost_val)):
                         sys.exit("got NaN loss, training failed.")
                 batch_id += 1
+                data_start_time = time.time()
+                break
+            pass_end = time.time()
             test_auc=test(main_program) 
-            print("pass_id=" + str(pass_id) + " auc=" + str(auc.eval()) + " test auc=" + str(test_auc))
+            test_auc_end = time.time()
+            print("pass_id=" + str(pass_id) + 
+                  " test auc=" + str(test_auc) +
+                  " pass_time=" + str(pass_end - pass_start) +
+                  " auc_time=" + str(test_auc_end - pass_end))
 
     if is_local:
         train_loop(fluid.default_main_program())
@@ -223,11 +276,18 @@ def train(pserver_endpoints,
             pserver_prog = t.get_pserver_program(current_endpoint)
             pserver_startup = t.get_startup_program(current_endpoint,
                                                     pserver_prog)
+            #with open("/home/crim/pserver_startup.proto", "w") as f:
+            #    f.write(str(pserver_startup))
+            #with open("/home/crim/pserver_main.proto", "w") as f:
+            #    f.write(str(pserver_prog))
             exe.run(pserver_startup)
             exe.run(pserver_prog)
         elif training_role == "TRAINER":
             print("run trianer")
-            train_loop(t.get_trainer_program())
+            main_program = t.get_trainer_program()
+            #with open("/home/crim/trainer_main.proto", "w") as f:
+            #    f.write(str(main_program))
+            train_loop(main_program)
 
 if __name__ == '__main__':
     port = os.getenv("PADDLE_PORT", "6174")

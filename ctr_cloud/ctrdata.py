@@ -22,7 +22,7 @@ SCHEMA_FILE = "schema.conf"
 MAX_SIZE = 1000
 
 
-class CTRData: 
+class CTRData(object): 
     """
     Feed CTR Reader
     """
@@ -73,24 +73,24 @@ class CTRData:
         """
         """
         def reader():
+            """"""
             num = 10240
             while num > 0:
                 num -= 1
                 d = int(random.random() * MAX_SIZE)
-                yield [d], d% 2
+                yield [d], d % 2
         return reader
     
-
     def train(self, filelist):
         """
         """
         def reader():
+            """"""
             for filename in filelist:
                 ins = self.reader_file(filename)
                 for data in ins:
                     yield data
         return reader
-
 
     def reader_file(self, file_name):
         """
