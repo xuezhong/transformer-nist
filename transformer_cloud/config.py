@@ -9,7 +9,7 @@ class TrainTaskConfig(object):
     # the hyper parameters for Adam optimizer.
     # This static learning_rate will be multiplied to the LearningRateScheduler
     # derived learning rate the to get the final learning rate.
-    learning_rate = 1
+    learning_rate = 0.1
     beta1 = 0.9
     beta2 = 0.98
     eps = 1e-9
