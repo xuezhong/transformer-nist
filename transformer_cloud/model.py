@@ -45,6 +45,7 @@ def multi_head_attention(queries,
         """
         Add linear projection to queries, keys, and values.
         """
+        
         q = layers.fc(input=queries,
                       size=d_key * n_head,
                       bias_attr=False,
@@ -57,6 +58,7 @@ def multi_head_attention(queries,
                       size=d_value * n_head,
                       bias_attr=False,
                       num_flatten_dims=2)
+        
         return q, k, v
 
     def __split_heads(x, n_head):
