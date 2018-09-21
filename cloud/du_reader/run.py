@@ -14,7 +14,7 @@ if __name__ == '__main__':
         --save_dir ./models \
         --pass_num 10 \
         --learning_rate 0.001 \
-        --batch_size 32 \
+        --batch_size 4 \
         --embed_size 300 \
         --hidden_size 150 \
         --max_p_num 5 \
