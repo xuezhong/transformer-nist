@@ -9,7 +9,6 @@ fs_name="hdfs://nmg01-mulan-hdfs.dmop.baidu.com:54310"
 force_reuse_output_path="True"
 ##ugi of hdfs
 fs_ugi=idl-dl,idl-dl@admin
-#fs_ugi="fcr-ad,2f6b06d4ce"
 #the initial model path on hdfs used to init parameters
 #init_model_path=
 #the initial model path for pservers
