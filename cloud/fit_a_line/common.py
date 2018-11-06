@@ -8,8 +8,8 @@ fs_name="hdfs://nmg01-mulan-hdfs.dmop.baidu.com:54310"
 ##If force_reuse_output_path is True ,paddle will remove output_path without check output_path exist
 force_reuse_output_path="True"
 ##ugi of hdfs
-#fs_ugi=idl-dl,idl-dl@admin
-fs_ugi="bml,bml#user"
+fs_ugi=idl-dl,idl-dl@admin
+#fs_ugi="bml,bml#user"
 #the initial model path on hdfs used to init parameters
 #init_model_path=
 #the initial model path for pservers

@@ -1,18 +1,19 @@
 batch_size=$1
 optim=$2
+dev_interval=$3
 paddlecloud job train --cluster-name paddle-jpaas-ai00-gpu \
 --job-version paddle-fluid-custom \
 --k8s-gpu-type baidu/gpu_p40 \
---k8s-gpu-cards 1 \
+--k8s-gpu-cards 8 \
 --k8s-priority high \
 --k8s-memory 100Gi \
 --k8s-ps-memory 20Gi \
---job-name du_reader_padding_b${batch_size}_${optim}_shuffle \
+--job-name dr_open_datav1_b${batch_size}_${optim}_dev${dev_interval}_wd_8c \
 --k8s-wall-time 5000:00:00 \
---start-cmd "python   thirdparty/src/fluid_padding_passages/train.py \
-        --trainset thirdparty/data/dureader/train.json \
-        --devset thirdparty/data/dureader/dev.json \
-        --vocab_dir thirdparty/data/dureader/ \
+--start-cmd "python   thirdparty/src/fluid_open_source/run.py \
+        --trainset thirdparty/data/old_dataset/preprocessed/trainset/*.train.json \
+        --devset thirdparty/data/old_dataset/preprocessed/devset/*.dev.json \
+        --vocab_dir thirdparty/data/old_dataset/vocab \
         --use_gpu true \
         --save_dir ./models \
         --pass_num 10 \
@@ -26,11 +27,12 @@ paddlecloud job train --cluster-name paddle-jpaas-ai00-gpu \
         --max_a_len 200 \
         --drop_rate 0.2 \
         --optim ${optim} \
-        --shuffle \
-        --simple_net 3" \
+        --train \
+        --weight_decay 0.0001 \
+        --dev_interval ${dev_interval}" \
 --job-conf du_reader/common.py \
---files du_reader/run.py du_reader/common.py \
---image-addr "registry.baidu.com/qiuxuezhong/fluid_gpu:bidaf_124428ed"
+--files du_reader/run.py du_reader/common.py du_reader/fd_ugi.py \
+--image-addr "registry.baidu.com/qiuxuezhong/fluid_gpu:db460e8d9ed7dec26e295f1b7e9e9872314c62bf"
 #--k8s-wall-time 10:00:00 \
 #--user-sk 69594fe214b15d1f8c21cdf817de6c3b \
 #--user-sk 69594fe214b15d1f8c21cdf817de6c3b \
